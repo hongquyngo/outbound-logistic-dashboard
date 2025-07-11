@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import logging
 import io
 import os
+from utils.calendar_utils import CalendarEventGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class EmailSender:
         delivery_df['week'] = delivery_df['delivery_date'].dt.isocalendar().week
         delivery_df['year'] = delivery_df['delivery_date'].dt.year
         
+        # Start HTML
         html = f"""
         <!DOCTYPE html>
         <html>
@@ -99,7 +101,7 @@ class EmailSender:
         <body>
             <div class="header">
                 <h1>📦 Delivery Schedule Notification</h1>
-                <p>Next 4 Weeks Delivery Plan</p>
+                <p>Your Next 4 Weeks Delivery Plan</p>
             </div>
             
             <div class="content">
@@ -170,12 +172,35 @@ class EmailSender:
                 </div>
             """
         
-        html += """
-                <div class="footer">
-                    <p>This is an automated email from Outbound Logistics System</p>
-                    <p>For questions, please contact logistics@company.com</p>
-                </div>
+        # Add calendar buttons
+        calendar_gen = CalendarEventGenerator()
+        google_cal_link = calendar_gen.create_google_calendar_link(sales_name, delivery_df)
+        outlook_cal_link = calendar_gen.create_outlook_calendar_link(sales_name, delivery_df)
+        
+        html += f"""
+            <div style="text-align: center; margin: 30px 0;">
+                <h3>📅 Add to Your Calendar</h3>
+                <p style="margin-bottom: 20px;">Click below to add this delivery schedule to your calendar:</p>
+                <a href="{google_cal_link}" 
+                   style="display: inline-block; background-color: #4285f4; color: white; padding: 12px 24px; 
+                          text-decoration: none; border-radius: 5px; margin: 0 10px; font-weight: bold;">
+                    📅 Add to Google Calendar
+                </a>
+                <a href="{outlook_cal_link}" 
+                   style="display: inline-block; background-color: #0078d4; color: white; padding: 12px 24px; 
+                          text-decoration: none; border-radius: 5px; margin: 0 10px; font-weight: bold;">
+                    📅 Add to Outlook Calendar
+                </a>
+                <p style="margin-top: 15px; font-size: 12px; color: #666;">
+                    Or download the attached .ics file to import into any calendar application
+                </p>
             </div>
+            
+            <div class="footer">
+                <p>This is an automated email from Outbound Logistics System</p>
+                <p>For questions, please contact: <a href="mailto:logistics@company.com">logistics@company.com</a></p>
+            </div>
+        </div>
         </body>
         </html>
         """
@@ -242,6 +267,18 @@ class EmailSender:
                 f'attachment; filename="delivery_schedule_{sales_name}_{datetime.now().strftime("%Y%m%d")}.xlsx"'
             )
             msg.attach(excel_part)
+            
+            # Create ICS calendar attachment
+            calendar_gen = CalendarEventGenerator()
+            ics_content = calendar_gen.create_ics_content(sales_name, delivery_df, self.sender_email)
+            ics_part = MIMEBase('text', 'calendar')
+            ics_part.set_payload(ics_content.encode('utf-8'))
+            encoders.encode_base64(ics_part)
+            ics_part.add_header(
+                'Content-Disposition',
+                f'attachment; filename="delivery_schedule_{sales_name}_{datetime.now().strftime("%Y%m%d")}.ics"'
+            )
+            msg.attach(ics_part)
             
             # Send email
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:

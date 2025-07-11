@@ -137,6 +137,20 @@ class DeliveryDataLoader:
                 if filters.get('statuses'):
                     query += " AND shipment_status IN :statuses"
                     params['statuses'] = tuple(filters['statuses'])
+                
+                # EPE Company filter
+                if filters.get('epe_filter'):
+                    if filters['epe_filter'] == 'EPE Companies Only':
+                        query += " AND is_epe_company = 'Yes'"
+                    elif filters['epe_filter'] == 'Non-EPE Companies Only':
+                        query += " AND is_epe_company = 'No'"
+                
+                # Foreign customer filter
+                if filters.get('foreign_filter'):
+                    if filters['foreign_filter'] == 'Foreign Only':
+                        query += " AND customer_country_code != legal_entity_country_code"
+                    elif filters['foreign_filter'] == 'Domestic Only':
+                        query += " AND customer_country_code = legal_entity_country_code"
             
             # Order by
             query += " ORDER BY delivery_id DESC, sto_dr_line_id DESC"

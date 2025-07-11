@@ -19,6 +19,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# App version
+APP_VERSION = "1.1.0"
+
 # Initialize auth manager
 auth_manager = AuthManager()
 

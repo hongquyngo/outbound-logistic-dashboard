@@ -25,7 +25,7 @@ if not auth_manager.check_session():
 data_loader = DeliveryDataLoader()
 
 st.title("📊 Delivery Schedule")
-# st.markdown("---")
+st.markdown("---")
 
 # Filter Section
 with st.expander("🔍 Filters", expanded=True):
@@ -95,6 +95,38 @@ with st.expander("🔍 Filters", expanded=True):
                 placeholder="All countries"
             )
 
+# Second row of filters
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    # EPE Company filter
+    epe_filter = st.selectbox(
+        "EPE Company Filter",
+        options=["All", "EPE Companies Only", "Non-EPE Companies Only"],
+        index=0
+    )
+
+with col5:
+    # Foreign customer filter
+    foreign_filter = st.selectbox(
+        "Customer Type",
+        options=["All Customers", "Domestic Only", "Foreign Only"],
+        index=0
+    )
+
+with col6:
+    # Help text
+    with st.expander("ℹ️ Filter Help"):
+        st.markdown("""
+        **EPE Company**: Filters by EPE company type
+        - EPE Companies: Shows only EPE type companies
+        - Non-EPE: Shows all other companies
+        
+        **Customer Type**: Filters by customer location
+        - Domestic: Same country as seller
+        - Foreign: Different country from seller
+        """)
+
 # Apply filters button
 if st.button("🔄 Apply Filters", type="primary", use_container_width=True):
     st.session_state.filters_applied = True
@@ -107,7 +139,9 @@ filters = {
     'customers': selected_customers if selected_customers else None,
     'ship_to_companies': selected_ship_to if selected_ship_to else None,
     'states': selected_states if selected_states else None,
-    'countries': selected_countries if selected_countries else None
+    'countries': selected_countries if selected_countries else None,
+    'epe_filter': epe_filter,
+    'foreign_filter': foreign_filter
 }
 
 # Load data
@@ -251,7 +285,7 @@ if df is not None and not df.empty:
                 options=df.columns.tolist(),
                 default=['dn_number', 'customer', 'recipient_company', 'etd', 
                         'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
-                        'fulfillment_status', 'shipment_status']
+                        'fulfillment_status', 'shipment_status', 'is_epe_company']
             )
             
             if display_columns:
@@ -273,14 +307,26 @@ if df is not None and not df.empty:
                         return 'background-color: #90ee90'
                     return ''
                 
+                def highlight_epe(val):
+                    if val == 'Yes':
+                        return 'font-weight: bold; color: #1976d2'
+                    return ''
+                
+                styled_df = display_df.style
+                
                 if 'fulfillment_status' in display_df.columns:
-                    styled_df = display_df.style.applymap(
+                    styled_df = styled_df.applymap(
                         highlight_fulfillment, 
                         subset=['fulfillment_status']
                     )
-                    st.dataframe(styled_df, use_container_width=True)
-                else:
-                    st.dataframe(display_df, use_container_width=True)
+                
+                if 'is_epe_company' in display_df.columns:
+                    styled_df = styled_df.applymap(
+                        highlight_epe,
+                        subset=['is_epe_company']
+                    )
+                
+                st.dataframe(styled_df, use_container_width=True)
 else:
     st.info("No delivery data found for the selected filters")
 
