@@ -246,22 +246,20 @@ class DeliveryDataLoader:
                 recipient_address,
                 recipient_state_province,
                 recipient_country_name,
-                COUNT(DISTINCT delivery_id) as delivery_count,
-                COUNT(DISTINCT sto_dr_line_id) as line_items,
-                SUM(standard_quantity) as total_quantity,
-                SUM(remaining_quantity_to_deliver) as remaining_quantity,
-                GROUP_CONCAT(DISTINCT product_pn SEPARATOR ', ') as products,
-                GROUP_CONCAT(DISTINCT dn_number SEPARATOR ', ') as dn_numbers,
-                MIN(shipment_status) as status,
-                MIN(fulfillment_status) as fulfillment_status
+                delivery_id,
+                dn_number,
+                sto_dr_line_id,
+                product_pn,
+                standard_quantity,
+                remaining_quantity_to_deliver,
+                shipment_status,
+                fulfillment_status
             FROM delivery_full_view
             WHERE created_by_name = :creator_name
                 AND etd >= :today
                 AND etd <= :end_date
                 AND remaining_quantity_to_deliver > 0
-            GROUP BY DATE(etd), customer, recipient_company, recipient_contact, 
-                     recipient_address, recipient_state_province, recipient_country_name
-            ORDER BY delivery_date, customer
+            ORDER BY delivery_date, customer, delivery_id
             """)
             
             with self.engine.connect() as conn:
@@ -270,6 +268,32 @@ class DeliveryDataLoader:
                     'today': today,
                     'end_date': end_date
                 })
+            
+            # Group by delivery date and aggregate properly
+            if not df.empty:
+                # First group by date to get summary
+                grouped = df.groupby(['delivery_date', 'customer', 'recipient_company', 
+                                    'recipient_contact', 'recipient_address', 
+                                    'recipient_state_province', 'recipient_country_name']).agg({
+                    'delivery_id': lambda x: len(x.unique()),  # Count unique deliveries
+                    'sto_dr_line_id': 'count',  # Count line items
+                    'standard_quantity': 'sum',  # Sum quantities
+                    'remaining_quantity_to_deliver': 'sum',
+                    'product_pn': lambda x: ', '.join(x.unique()[:5]),  # First 5 unique products
+                    'dn_number': lambda x: ', '.join(x.unique()),  # Unique DN numbers
+                    'shipment_status': 'first',
+                    'fulfillment_status': 'first'
+                }).reset_index()
+                
+                # Rename columns for clarity
+                grouped.columns = ['delivery_date', 'customer', 'recipient_company', 
+                                  'recipient_contact', 'recipient_address', 
+                                  'recipient_state_province', 'recipient_country_name',
+                                  'delivery_count', 'line_items', 'total_quantity', 
+                                  'remaining_quantity', 'products', 'dn_numbers',
+                                  'status', 'fulfillment_status']
+                
+                return grouped
             
             return df
             

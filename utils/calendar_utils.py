@@ -7,6 +7,7 @@ import pandas as pd
 
 class CalendarEventGenerator:
     """Generate iCalendar (.ics) files for delivery schedules"""
+    """Generate iCalendar (.ics) files for delivery schedules"""
     
     @staticmethod
     def create_ics_content(sales_name, delivery_df, organizer_email):
@@ -42,7 +43,8 @@ METHOD:REQUEST
             dtend = end_datetime.strftime('%Y%m%dT%H%M%SZ')
             
             # Create summary and description for this date
-            total_deliveries = len(date_df)
+            total_deliveries = date_df.get('delivery_count', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
+            total_line_items = date_df.get('line_items', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
             total_quantity = date_df['total_quantity'].sum()
             customers = date_df['customer'].unique()
             
@@ -50,6 +52,7 @@ METHOD:REQUEST
             
             description = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}\\n\\n"
             description += f"Total Deliveries: {total_deliveries}\\n"
+            description += f"Total Line Items: {total_line_items}\\n"
             description += f"Total Quantity: {total_quantity:,.0f}\\n\\n"
             description += "DELIVERIES:\\n"
             
@@ -112,13 +115,15 @@ END:VEVENT
             dates = f"{start_dt.strftime('%Y%m%dT%H%M%S')}/{end_dt.strftime('%Y%m%dT%H%M%S')}"
             
             # Create title and details
-            total_deliveries = len(date_df)
+            total_deliveries = date_df.get('delivery_count', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
+            total_line_items = date_df.get('line_items', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
             total_quantity = date_df['total_quantity'].sum()
             
             title = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
             
             details = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}\n\n"
             details += f"Total Deliveries: {total_deliveries}\n"
+            details += f"Total Line Items: {total_line_items}\n"
             details += f"Total Quantity: {total_quantity:,.0f}\n\n"
             details += "DELIVERIES:\n"
             
@@ -182,13 +187,15 @@ END:VEVENT
             enddt = end_dt.strftime('%Y-%m-%dT%H:%M:%S')
             
             # Create title and body
-            total_deliveries = len(date_df)
+            total_deliveries = date_df.get('delivery_count', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
+            total_line_items = date_df.get('line_items', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
             total_quantity = date_df['total_quantity'].sum()
             
             subject = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
             
             body = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}<br><br>"
             body += f"Total Deliveries: {total_deliveries}<br>"
+            body += f"Total Line Items: {total_line_items}<br>"
             body += f"Total Quantity: {total_quantity:,.0f}<br><br>"
             body += "DELIVERIES:<br>"
             
