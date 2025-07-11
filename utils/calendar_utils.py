@@ -3,133 +3,230 @@
 from datetime import datetime, timedelta
 import uuid
 import base64
+import pandas as pd
 
 class CalendarEventGenerator:
     """Generate iCalendar (.ics) files for delivery schedules"""
     
     @staticmethod
     def create_ics_content(sales_name, delivery_df, organizer_email):
-        """Create ICS content for calendar event"""
+        """Create ICS content with multiple events - one for each delivery date"""
         
-        # Get date range
-        start_date = delivery_df['delivery_date'].min()
-        end_date = delivery_df['delivery_date'].max()
-        
-        # Create event summary
-        total_deliveries = len(delivery_df)
-        total_customers = delivery_df['customer'].nunique()
-        
-        # Generate unique ID
-        uid = str(uuid.uuid4())
-        
-        # Current timestamp
-        now = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-        
-        # Create description with delivery details
-        description = f"Delivery Schedule for {sales_name}\\n\\n"
-        description += f"Period: {start_date.strftime('%B %d')} - {end_date.strftime('%B %d, %Y')}\\n"
-        description += f"Total Deliveries: {total_deliveries}\\n"
-        description += f"Total Customers: {total_customers}\\n\\n"
-        description += "DELIVERY BREAKDOWN:\\n"
-        
-        # Group by date for summary
-        for date, date_df in delivery_df.groupby('delivery_date'):
-            description += f"\\n{date.strftime('%b %d')}:\\n"
-            for _, row in date_df.iterrows():
-                description += f"- {row['customer']} → {row['recipient_company']} ({row['total_quantity']:,.0f} units)\\n"
-        
-        # Create ICS content
-        ics_content = f"""BEGIN:VCALENDAR
+        # ICS header
+        ics_content = """BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Outbound Logistics//Delivery Schedule//EN
 CALSCALE:GREGORIAN
 METHOD:REQUEST
-BEGIN:VEVENT
+"""
+        
+        # Group deliveries by date
+        delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
+        grouped = delivery_df.groupby('delivery_date')
+        
+        # Create an event for each delivery date
+        for delivery_date, date_df in grouped:
+            # Generate unique ID for each event
+            uid = str(uuid.uuid4())
+            
+            # Current timestamp
+            now = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+            
+            # Set event time: 8:30 AM - 5:30 PM local time
+            # Convert to UTC (assuming Vietnam timezone GMT+7)
+            start_datetime = delivery_date.replace(hour=8, minute=30) - timedelta(hours=7)
+            end_datetime = delivery_date.replace(hour=17, minute=30) - timedelta(hours=7)
+            
+            # Format for ICS
+            dtstart = start_datetime.strftime('%Y%m%dT%H%M%SZ')
+            dtend = end_datetime.strftime('%Y%m%dT%H%M%SZ')
+            
+            # Create summary and description for this date
+            total_deliveries = len(date_df)
+            total_quantity = date_df['total_quantity'].sum()
+            customers = date_df['customer'].unique()
+            
+            summary = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
+            
+            description = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}\\n\\n"
+            description += f"Total Deliveries: {total_deliveries}\\n"
+            description += f"Total Quantity: {total_quantity:,.0f}\\n\\n"
+            description += "DELIVERIES:\\n"
+            
+            for _, row in date_df.iterrows():
+                description += f"\\n• {row['customer']}\\n"
+                description += f"  Ship To: {row['recipient_company']}\\n"
+                description += f"  Location: {row['recipient_state_province']}, {row['recipient_country_name']}\\n"
+                description += f"  Products: {row['products'][:50]}...\\n"
+                description += f"  Quantity: {row['total_quantity']:,.0f}\\n"
+                description += f"  Status: {row['fulfillment_status']}\\n"
+            
+            # Get locations for this date
+            locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
+            location_str = "; ".join(locations[:3])  # Limit to first 3 locations
+            if len(locations) > 3:
+                location_str += f" and {len(locations)-3} more"
+            
+            # Add event to ICS
+            ics_content += f"""BEGIN:VEVENT
 UID:{uid}@outbound.prostech.vn
 DTSTAMP:{now}
 ORGANIZER;CN=Outbound Logistics:mailto:{organizer_email}
-DTSTART;VALUE=DATE:{start_date.strftime('%Y%m%d')}
-DTEND;VALUE=DATE:{(end_date + timedelta(days=1)).strftime('%Y%m%d')}
-SUMMARY:📦 Delivery Schedule - {sales_name}
+DTSTART:{dtstart}
+DTEND:{dtend}
+SUMMARY:{summary}
 DESCRIPTION:{description}
-LOCATION:Various Locations
+LOCATION:{location_str}
 STATUS:CONFIRMED
 SEQUENCE:0
-TRANSP:TRANSPARENT
+TRANSP:OPAQUE
 BEGIN:VALARM
-TRIGGER:-P1D
+TRIGGER:-PT15M
 ACTION:DISPLAY
-DESCRIPTION:Reminder: Review tomorrow's deliveries
+DESCRIPTION:Delivery reminder - Check today's deliveries
 END:VALARM
 END:VEVENT
-END:VCALENDAR"""
+"""
+        
+        # ICS footer
+        ics_content += "END:VCALENDAR"
         
         return ics_content
     
     @staticmethod
+    def create_google_calendar_links(sales_name, delivery_df):
+        """Create Google Calendar event links for each delivery date"""
+        links = []
+        
+        # Group deliveries by date
+        delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
+        grouped = delivery_df.groupby('delivery_date')
+        
+        for delivery_date, date_df in grouped:
+            # Format date and time for Google Calendar (Vietnam timezone)
+            # Start: 8:30 AM, End: 5:30 PM
+            start_dt = delivery_date.replace(hour=8, minute=30)
+            end_dt = delivery_date.replace(hour=17, minute=30)
+            
+            # Format: YYYYMMDDTHHmmSS/YYYYMMDDTHHmmSS
+            dates = f"{start_dt.strftime('%Y%m%dT%H%M%S')}/{end_dt.strftime('%Y%m%dT%H%M%S')}"
+            
+            # Create title and details
+            total_deliveries = len(date_df)
+            total_quantity = date_df['total_quantity'].sum()
+            
+            title = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
+            
+            details = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}\n\n"
+            details += f"Total Deliveries: {total_deliveries}\n"
+            details += f"Total Quantity: {total_quantity:,.0f}\n\n"
+            details += "DELIVERIES:\n"
+            
+            for _, row in date_df.iterrows():
+                details += f"\n• {row['customer']}\n"
+                details += f"  → {row['recipient_company']}\n"
+                details += f"  📍 {row['recipient_state_province']}, {row['recipient_country_name']}\n"
+                details += f"  📦 {row['total_quantity']:,.0f} units\n"
+            
+            # Get locations
+            locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
+            location_str = "; ".join(locations[:3])
+            if len(locations) > 3:
+                location_str += f" +{len(locations)-3} more"
+            
+            # URL encode the parameters
+            import urllib.parse
+            params = {
+                'action': 'TEMPLATE',
+                'text': title,
+                'dates': dates,
+                'details': details,
+                'location': location_str,
+                'sf': 'true'
+            }
+            
+            base_url = 'https://calendar.google.com/calendar/render'
+            link = f"{base_url}?{urllib.parse.urlencode(params)}"
+            
+            links.append({
+                'date': delivery_date,
+                'link': link,
+                'count': total_deliveries
+            })
+        
+        return links
+    
+    @staticmethod
     def create_google_calendar_link(sales_name, delivery_df):
-        """Create Google Calendar event link"""
+        """Create a single Google Calendar link for the first delivery date (backward compatibility)"""
+        links = CalendarEventGenerator.create_google_calendar_links(sales_name, delivery_df)
+        return links[0]['link'] if links else "#"
+    
+    @staticmethod
+    def create_outlook_calendar_links(sales_name, delivery_df):
+        """Create Outlook/Office 365 calendar event links for each delivery date"""
+        links = []
         
-        # Get date range
-        start_date = delivery_df['delivery_date'].min()
-        end_date = delivery_df['delivery_date'].max() + timedelta(days=1)
+        # Group deliveries by date
+        delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
+        grouped = delivery_df.groupby('delivery_date')
         
-        # Format dates for Google Calendar
-        dates = f"{start_date.strftime('%Y%m%d')}/{end_date.strftime('%Y%m%d')}"
+        for delivery_date, date_df in grouped:
+            # Format date and time for Outlook
+            # Start: 8:30 AM, End: 5:30 PM
+            start_dt = delivery_date.replace(hour=8, minute=30)
+            end_dt = delivery_date.replace(hour=17, minute=30)
+            
+            # Format for Outlook (ISO format)
+            startdt = start_dt.strftime('%Y-%m-%dT%H:%M:%S')
+            enddt = end_dt.strftime('%Y-%m-%dT%H:%M:%S')
+            
+            # Create title and body
+            total_deliveries = len(date_df)
+            total_quantity = date_df['total_quantity'].sum()
+            
+            subject = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
+            
+            body = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}<br><br>"
+            body += f"Total Deliveries: {total_deliveries}<br>"
+            body += f"Total Quantity: {total_quantity:,.0f}<br><br>"
+            body += "DELIVERIES:<br>"
+            
+            for _, row in date_df.iterrows():
+                body += f"<br>• {row['customer']}<br>"
+                body += f"  → {row['recipient_company']}<br>"
+                body += f"  📍 {row['recipient_state_province']}, {row['recipient_country_name']}<br>"
+                body += f"  📦 {row['total_quantity']:,.0f} units<br>"
+            
+            # Get locations
+            locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
+            location_str = "; ".join(locations[:3])
+            if len(locations) > 3:
+                location_str += f" +{len(locations)-3} more"
+            
+            # URL encode the parameters
+            import urllib.parse
+            params = {
+                'subject': subject,
+                'startdt': startdt,
+                'enddt': enddt,
+                'body': body,
+                'location': location_str
+            }
+            
+            base_url = 'https://outlook.live.com/calendar/0/deeplink/compose'
+            link = f"{base_url}?{urllib.parse.urlencode(params)}"
+            
+            links.append({
+                'date': delivery_date,
+                'link': link,
+                'count': total_deliveries
+            })
         
-        # Create title and details
-        title = f"📦 Delivery Schedule - {sales_name}"
-        
-        details = f"Delivery Schedule for {sales_name}\n\n"
-        details += f"Period: {start_date.strftime('%B %d')} - {(end_date - timedelta(days=1)).strftime('%B %d, %Y')}\n"
-        details += f"Total Deliveries: {len(delivery_df)}\n"
-        details += f"Total Customers: {delivery_df['customer'].nunique()}\n\n"
-        details += "Check email for detailed schedule and Excel attachment."
-        
-        # URL encode the parameters
-        import urllib.parse
-        params = {
-            'action': 'TEMPLATE',
-            'text': title,
-            'dates': dates,
-            'details': details,
-            'location': 'Various Locations',
-            'sf': 'true'
-        }
-        
-        base_url = 'https://calendar.google.com/calendar/render'
-        return f"{base_url}?{urllib.parse.urlencode(params)}"
+        return links
     
     @staticmethod
     def create_outlook_calendar_link(sales_name, delivery_df):
-        """Create Outlook/Office 365 calendar event link"""
-        
-        # Get date range
-        start_date = delivery_df['delivery_date'].min()
-        end_date = delivery_df['delivery_date'].max() + timedelta(days=1)
-        
-        # Format dates for Outlook (ISO format)
-        startdt = start_date.strftime('%Y-%m-%d')
-        enddt = end_date.strftime('%Y-%m-%d')
-        
-        # Create title and body
-        subject = f"📦 Delivery Schedule - {sales_name}"
-        
-        body = f"Delivery Schedule for {sales_name}<br><br>"
-        body += f"Period: {start_date.strftime('%B %d')} - {(end_date - timedelta(days=1)).strftime('%B %d, %Y')}<br>"
-        body += f"Total Deliveries: {len(delivery_df)}<br>"
-        body += f"Total Customers: {delivery_df['customer'].nunique()}<br><br>"
-        body += "Check email for detailed schedule and Excel attachment."
-        
-        # URL encode the parameters
-        import urllib.parse
-        params = {
-            'subject': subject,
-            'startdt': startdt,
-            'enddt': enddt,
-            'body': body,
-            'allday': 'true'
-        }
-        
-        base_url = 'https://outlook.live.com/calendar/0/deeplink/compose'
-        return f"{base_url}?{urllib.parse.urlencode(params)}"
+        """Create a single Outlook calendar link for the first delivery date (backward compatibility)"""
+        links = CalendarEventGenerator.create_outlook_calendar_links(sales_name, delivery_df)
+        return links[0]['link'] if links else "#"

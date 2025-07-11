@@ -95,37 +95,30 @@ with st.expander("🔍 Filters", expanded=True):
                 placeholder="All countries"
             )
 
-# Second row of filters
-col4, col5, col6 = st.columns(3)
+    # Second row of filters
+    col4, col5, col6 = st.columns(3)
 
-with col4:
-    # EPE Company filter
-    epe_filter = st.selectbox(
-        "EPE Company Filter",
-        options=["All", "EPE Companies Only", "Non-EPE Companies Only"],
-        index=0
-    )
+    with col4:
+        # EPE Company filter
+        epe_filter = st.selectbox(
+            "EPE Company Filter",
+            options=["All", "EPE Companies Only", "Non-EPE Companies Only"],
+            index=0,
+            help="Filter by EPE company type. EPE companies are a specific customer category."
+        )
 
-with col5:
-    # Foreign customer filter
-    foreign_filter = st.selectbox(
-        "Customer Type",
-        options=["All Customers", "Domestic Only", "Foreign Only"],
-        index=0
-    )
+    with col5:
+        # Foreign customer filter
+        foreign_filter = st.selectbox(
+            "Customer Type",
+            options=["All Customers", "Domestic Only", "Foreign Only"],
+            index=0,
+            help="Filter by customer location. Domestic = same country as seller, Foreign = different country."
+        )
 
-with col6:
-    # Help text
-    with st.expander("ℹ️ Filter Help"):
-        st.markdown("""
-        **EPE Company**: Filters by EPE company type
-        - EPE Companies: Shows only EPE type companies
-        - Non-EPE: Shows all other companies
-        
-        **Customer Type**: Filters by customer location
-        - Domestic: Same country as seller
-        - Foreign: Different country from seller
-        """)
+    with col6:
+        # Additional filter or spacing
+        st.empty()  # For layout balance
 
 # Apply filters button
 if st.button("🔄 Apply Filters", type="primary", use_container_width=True):
