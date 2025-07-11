@@ -11,6 +11,7 @@ import logging
 import io
 import os
 from utils.calendar_utils import CalendarEventGenerator
+from utils.config import EMAIL_SENDER, EMAIL_PASSWORD
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +21,8 @@ class EmailSender:
     def __init__(self, smtp_host="smtp.gmail.com", smtp_port=587):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
-        self.sender_email = os.getenv("EMAIL_SENDER", "logistics@company.com")
-        self.sender_password = os.getenv("EMAIL_PASSWORD", "")
+        self.sender_email = EMAIL_SENDER or "logistics@company.com"
+        self.sender_password = EMAIL_PASSWORD or ""
     
     def create_delivery_schedule_html(self, delivery_df, sales_name):
         """Create HTML content for delivery schedule email"""

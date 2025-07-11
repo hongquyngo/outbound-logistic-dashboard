@@ -24,11 +24,14 @@ if IS_RUNNING_ON_CLOUD:
     DB_CONFIG = dict(st.secrets["DB_CONFIG"])
     EXCHANGE_RATE_API_KEY = st.secrets["API"]["EXCHANGE_RATE_API_KEY"]
     GOOGLE_SERVICE_ACCOUNT_JSON = st.secrets["gcp_service_account"]
+    EMAIL_SENDER = st.secrets["EMAIL"]["EMAIL_SENDER"]
+    EMAIL_PASSWORD = st.secrets["EMAIL"]["EMAIL_PASSWORD"]
 
     logger.info("☁️ Running in STREAMLIT CLOUD")
     logger.info(f"✅ DB_CONFIG: {DB_CONFIG}")
     logger.info(f"✅ Exchange API Key (cloud): {len(EXCHANGE_RATE_API_KEY)}")
     logger.info(f"✅ GCP Service Email: {GOOGLE_SERVICE_ACCOUNT_JSON.get('client_email', 'N/A')}")
+    logger.info(f"✅ Email Sender: {EMAIL_SENDER}")
 
 else:
     load_dotenv()
