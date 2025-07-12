@@ -230,9 +230,9 @@ class DeliveryDataLoader:
         except Exception as e:
             logger.error(f"Error pivoting data: {e}")
             return pd.DataFrame()
-    
+   
     def get_sales_delivery_summary(self, creator_name, weeks_ahead=4):
-        """Get delivery summary for a specific sales person"""
+        """Get delivery summary for a specific sales person - with line item details"""
         try:
             today = datetime.now().date()
             end_date = today + timedelta(weeks=weeks_ahead)
@@ -241,25 +241,43 @@ class DeliveryDataLoader:
             SELECT 
                 DATE(etd) as delivery_date,
                 customer,
+                customer_code,
                 recipient_company,
+                recipient_company_code,
                 recipient_contact,
+                recipient_contact_email,
+                recipient_contact_phone,
                 recipient_address,
                 recipient_state_province,
                 recipient_country_name,
                 delivery_id,
                 dn_number,
                 sto_dr_line_id,
+                oc_number,
+                oc_line_id,
                 product_pn,
+                product_id,
+                pt_code,
+                package_size,
                 standard_quantity,
+                selling_quantity,
+                uom_conversion,
                 remaining_quantity_to_deliver,
+                total_instock_at_preferred_warehouse,
+                gap_quantity,
                 shipment_status,
-                fulfillment_status
+                fulfillment_status,
+                preferred_warehouse,
+                is_epe_company,
+                legal_entity,
+                created_by_name,
+                created_date
             FROM delivery_full_view
             WHERE created_by_name = :creator_name
                 AND etd >= :today
                 AND etd <= :end_date
                 AND remaining_quantity_to_deliver > 0
-            ORDER BY delivery_date, customer, delivery_id
+            ORDER BY delivery_date, customer, delivery_id, sto_dr_line_id
             """)
             
             with self.engine.connect() as conn:
@@ -269,31 +287,10 @@ class DeliveryDataLoader:
                     'end_date': end_date
                 })
             
-            # Group by delivery date and aggregate properly
+            # Add backward compatibility
             if not df.empty:
-                # First group by date to get summary
-                grouped = df.groupby(['delivery_date', 'customer', 'recipient_company', 
-                                    'recipient_contact', 'recipient_address', 
-                                    'recipient_state_province', 'recipient_country_name']).agg({
-                    'delivery_id': lambda x: len(x.unique()),  # Count unique deliveries
-                    'sto_dr_line_id': 'count',  # Count line items
-                    'standard_quantity': 'sum',  # Sum quantities
-                    'remaining_quantity_to_deliver': 'sum',
-                    'product_pn': lambda x: ', '.join(x.unique()[:5]),  # First 5 unique products
-                    'dn_number': lambda x: ', '.join(x.unique()),  # Unique DN numbers
-                    'shipment_status': 'first',
-                    'fulfillment_status': 'first'
-                }).reset_index()
-                
-                # Rename columns for clarity
-                grouped.columns = ['delivery_date', 'customer', 'recipient_company', 
-                                  'recipient_contact', 'recipient_address', 
-                                  'recipient_state_province', 'recipient_country_name',
-                                  'delivery_count', 'line_items', 'total_quantity', 
-                                  'remaining_quantity', 'products', 'dn_numbers',
-                                  'status', 'fulfillment_status']
-                
-                return grouped
+                # Add total_quantity as alias for remaining_quantity_to_deliver
+                df['total_quantity'] = df['remaining_quantity_to_deliver']
             
             return df
             

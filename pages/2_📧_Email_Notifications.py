@@ -135,6 +135,7 @@ with col2:
 st.markdown("---")
 
 # Preview section
+
 if selected_sales and st.button("👁️ Preview Email Content", type="secondary"):
     with st.spinner("Generating preview..."):
         # Get data for first selected sales
@@ -147,16 +148,26 @@ if selected_sales and st.button("👁️ Preview Email Content", type="secondary
             # Show summary
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Total Deliveries", len(preview_df))
+                # Count unique deliveries
+                unique_deliveries = preview_df.groupby(['delivery_date', 'customer', 'recipient_company']).ngroups
+                st.metric("Total Deliveries", unique_deliveries)
             with col2:
-                st.metric("Total Quantity", f"{preview_df['total_quantity'].sum():,.0f}")
+                # Sum remaining quantities
+                st.metric("Total Remaining Quantity", f"{preview_df['remaining_quantity_to_deliver'].sum():,.0f}")
             with col3:
                 st.metric("Unique Customers", preview_df['customer'].nunique())
             
             # Show sample data
+            # Group by date/customer/product for display
+            display_df = preview_df.groupby(['delivery_date', 'customer', 'recipient_company', 'product_pn']).agg({
+                'remaining_quantity_to_deliver': 'sum',
+                'fulfillment_status': lambda x: 'Mixed' if x.nunique() > 1 else x.iloc[0]
+            }).reset_index()
+            
+            # Show first 10 rows
             st.dataframe(
-                preview_df[['delivery_date', 'customer', 'recipient_company', 
-                          'total_quantity', 'products']].head(10),
+                display_df[['delivery_date', 'customer', 'recipient_company', 'product_pn', 
+                          'remaining_quantity_to_deliver', 'fulfillment_status']].head(10),
                 use_container_width=True
             )
         else:

@@ -2,11 +2,11 @@
 
 from datetime import datetime, timedelta
 import uuid
-import base64
 import pandas as pd
+import urllib.parse
+
 
 class CalendarEventGenerator:
-    """Generate iCalendar (.ics) files for delivery schedules"""
     """Generate iCalendar (.ics) files for delivery schedules"""
     
     @staticmethod
@@ -43,26 +43,39 @@ METHOD:REQUEST
             dtend = end_datetime.strftime('%Y%m%dT%H%M%SZ')
             
             # Create summary and description for this date
-            total_deliveries = date_df.get('delivery_count', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
-            total_line_items = date_df.get('line_items', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
-            total_quantity = date_df['total_quantity'].sum()
-            customers = date_df['customer'].unique()
+            # Aggregate quantities by product for accurate totals
+            products_agg = date_df.groupby('product_pn').agg({
+                'remaining_quantity_to_deliver': 'sum'
+            }).reset_index()
+            
+            total_deliveries = len(date_df.groupby(['customer', 'recipient_company'])) if isinstance(date_df, pd.DataFrame) else 1
+            total_line_items = len(date_df)
+            total_quantity = date_df['remaining_quantity_to_deliver'].sum()
             
             summary = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
             
             description = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}\\n\\n"
             description += f"Total Deliveries: {total_deliveries}\\n"
             description += f"Total Line Items: {total_line_items}\\n"
-            description += f"Total Quantity: {total_quantity:,.0f}\\n\\n"
+            description += f"Total Remaining Quantity: {total_quantity:,.0f}\\n\\n"
             description += "DELIVERIES:\\n"
             
-            for _, row in date_df.iterrows():
-                description += f"\\n• {row['customer']}\\n"
-                description += f"  Ship To: {row['recipient_company']}\\n"
-                description += f"  Location: {row['recipient_state_province']}, {row['recipient_country_name']}\\n"
-                description += f"  Products: {row['products'][:50]}...\\n"
-                description += f"  Quantity: {row['total_quantity']:,.0f}\\n"
-                description += f"  Status: {row['fulfillment_status']}\\n"
+            # Group by customer and recipient for description
+            for (customer, recipient), cust_df in date_df.groupby(['customer', 'recipient_company']):
+                description += f"\\n• {customer} → {recipient}\\n"
+                location = f"{cust_df.iloc[0]['recipient_state_province']}, {cust_df.iloc[0]['recipient_country_name']}"
+                description += f"  Location: {location}\\n"
+                
+                # Aggregate products and quantities
+                prod_summary = cust_df.groupby('product_pn')['remaining_quantity_to_deliver'].sum()
+                for prod, qty in prod_summary.items():
+                    description += f"  - {prod}: {qty:,.0f} units\\n"
+                
+                status = cust_df['fulfillment_status'].unique()
+                if len(status) > 1:
+                    description += f"  Status: Mixed\\n"
+                else:
+                    description += f"  Status: {status[0]}\\n"
             
             # Get locations for this date
             locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
@@ -115,23 +128,33 @@ END:VEVENT
             dates = f"{start_dt.strftime('%Y%m%dT%H%M%S')}/{end_dt.strftime('%Y%m%dT%H%M%S')}"
             
             # Create title and details
-            total_deliveries = date_df.get('delivery_count', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
-            total_line_items = date_df.get('line_items', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
-            total_quantity = date_df['total_quantity'].sum()
+            # Aggregate quantities by product for accurate totals
+            products_agg = date_df.groupby('product_pn').agg({
+                'remaining_quantity_to_deliver': 'sum'
+            }).reset_index()
+            
+            total_deliveries = len(date_df.groupby(['customer', 'recipient_company'])) if isinstance(date_df, pd.DataFrame) else 1
+            total_line_items = len(date_df)
+            total_quantity = date_df['remaining_quantity_to_deliver'].sum()
             
             title = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
             
             details = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}\n\n"
             details += f"Total Deliveries: {total_deliveries}\n"
             details += f"Total Line Items: {total_line_items}\n"
-            details += f"Total Quantity: {total_quantity:,.0f}\n\n"
+            details += f"Total Remaining Quantity: {total_quantity:,.0f}\n\n"
             details += "DELIVERIES:\n"
             
-            for _, row in date_df.iterrows():
-                details += f"\n• {row['customer']}\n"
-                details += f"  → {row['recipient_company']}\n"
-                details += f"  📍 {row['recipient_state_province']}, {row['recipient_country_name']}\n"
-                details += f"  📦 {row['total_quantity']:,.0f} units\n"
+            # Group by customer and recipient for details
+            for (customer, recipient), cust_df in date_df.groupby(['customer', 'recipient_company']):
+                details += f"\n• {customer} → {recipient}\n"
+                location = f"{cust_df.iloc[0]['recipient_state_province']}, {cust_df.iloc[0]['recipient_country_name']}"
+                details += f"  📍 {location}\n"
+                
+                # Aggregate products and quantities
+                prod_summary = cust_df.groupby('product_pn')['remaining_quantity_to_deliver'].sum()
+                for prod, qty in prod_summary.items():
+                    details += f"  📦 {prod}: {qty:,.0f} units\n"
             
             # Get locations
             locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
@@ -140,7 +163,6 @@ END:VEVENT
                 location_str += f" +{len(locations)-3} more"
             
             # URL encode the parameters
-            import urllib.parse
             params = {
                 'action': 'TEMPLATE',
                 'text': title,
@@ -187,23 +209,33 @@ END:VEVENT
             enddt = end_dt.strftime('%Y-%m-%dT%H:%M:%S')
             
             # Create title and body
-            total_deliveries = date_df.get('delivery_count', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
-            total_line_items = date_df.get('line_items', len(date_df)) if isinstance(date_df, pd.DataFrame) else len(date_df)
-            total_quantity = date_df['total_quantity'].sum()
+            # Aggregate quantities by product for accurate totals
+            products_agg = date_df.groupby('product_pn').agg({
+                'remaining_quantity_to_deliver': 'sum'
+            }).reset_index()
+            
+            total_deliveries = len(date_df.groupby(['customer', 'recipient_company'])) if isinstance(date_df, pd.DataFrame) else 1
+            total_line_items = len(date_df)
+            total_quantity = date_df['remaining_quantity_to_deliver'].sum()
             
             subject = f"📦 Deliveries ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
             
             body = f"Delivery Schedule for {delivery_date.strftime('%B %d, %Y')}<br><br>"
             body += f"Total Deliveries: {total_deliveries}<br>"
             body += f"Total Line Items: {total_line_items}<br>"
-            body += f"Total Quantity: {total_quantity:,.0f}<br><br>"
+            body += f"Total Remaining Quantity: {total_quantity:,.0f}<br><br>"
             body += "DELIVERIES:<br>"
             
-            for _, row in date_df.iterrows():
-                body += f"<br>• {row['customer']}<br>"
-                body += f"  → {row['recipient_company']}<br>"
-                body += f"  📍 {row['recipient_state_province']}, {row['recipient_country_name']}<br>"
-                body += f"  📦 {row['total_quantity']:,.0f} units<br>"
+            # Group by customer and recipient for body
+            for (customer, recipient), cust_df in date_df.groupby(['customer', 'recipient_company']):
+                body += f"<br>• {customer} → {recipient}<br>"
+                location = f"{cust_df.iloc[0]['recipient_state_province']}, {cust_df.iloc[0]['recipient_country_name']}"
+                body += f"  📍 {location}<br>"
+                
+                # Aggregate products and quantities
+                prod_summary = cust_df.groupby('product_pn')['remaining_quantity_to_deliver'].sum()
+                for prod, qty in prod_summary.items():
+                    body += f"  📦 {prod}: {qty:,.0f} units<br>"
             
             # Get locations
             locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
@@ -212,7 +244,6 @@ END:VEVENT
                 location_str += f" +{len(locations)-3} more"
             
             # URL encode the parameters
-            import urllib.parse
             params = {
                 'subject': subject,
                 'startdt': startdt,
