@@ -339,6 +339,94 @@ class DeliveryDataLoader:
             logger.error(f"Error getting sales delivery summary: {e}")
             return pd.DataFrame()
     
+    def get_sales_urgent_deliveries(self, creator_name):
+        """Get overdue and due today deliveries for a specific sales person (NEW)"""
+        try:
+            query = text("""
+            SELECT 
+                DATE(etd) as delivery_date,
+                customer,
+                customer_code,
+                recipient_company,
+                recipient_company_code,
+                recipient_contact,
+                recipient_contact_email,
+                recipient_contact_phone,
+                recipient_address,
+                recipient_state_province,
+                recipient_country_name,
+                delivery_id,
+                dn_number,
+                sto_dr_line_id,
+                oc_number,
+                oc_line_id,
+                product_pn,
+                product_id,
+                pt_code,
+                package_size,
+                standard_quantity,
+                selling_quantity,
+                uom_conversion,
+                remaining_quantity_to_deliver,
+                total_instock_at_preferred_warehouse,
+                total_instock_all_warehouses,
+                gap_quantity,
+                product_gap_quantity,
+                product_total_remaining_demand,
+                product_fulfill_rate_percent,
+                delivery_demand_percentage,
+                shipment_status,
+                shipment_status_vn,
+                fulfillment_status,
+                product_fulfillment_status,
+                delivery_timeline_status,
+                days_overdue,
+                preferred_warehouse,
+                is_epe_company,
+                legal_entity,
+                created_by_name,
+                created_date
+            FROM delivery_full_view
+            WHERE created_by_name = :creator_name
+                AND delivery_timeline_status IN ('Overdue', 'Due Today')
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+            ORDER BY 
+                delivery_timeline_status DESC,  -- Overdue first, then Due Today
+                days_overdue DESC,              -- Most overdue first
+                delivery_date,
+                customer,
+                delivery_id,
+                sto_dr_line_id
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params={
+                    'creator_name': creator_name
+                })
+            
+            # Debug: Check for duplicate columns
+            if not df.empty:
+                duplicate_cols = df.columns[df.columns.duplicated()].tolist()
+                if duplicate_cols:
+                    logger.warning(f"Duplicate columns found in urgent deliveries: {duplicate_cols}")
+                    # Remove duplicates
+                    df = df.loc[:, ~df.columns.duplicated()]
+                
+                # Add total_quantity as alias
+                df['total_quantity'] = df['remaining_quantity_to_deliver']
+                
+                # Log summary
+                overdue_count = df[df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
+                due_today_count = df[df['delivery_timeline_status'] == 'Due Today']['delivery_id'].nunique()
+                logger.info(f"Loaded {overdue_count} overdue and {due_today_count} due today deliveries for {creator_name}")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting urgent deliveries: {e}")
+            return pd.DataFrame()
+    
     def get_overdue_deliveries(self):
         """Get overdue deliveries that need attention"""
         try:

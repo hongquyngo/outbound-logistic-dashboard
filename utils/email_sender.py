@@ -23,11 +23,273 @@ class EmailSender:
         # Use environment variables or defaults
         self.smtp_host = smtp_host or os.getenv("SMTP_HOST", "smtp.gmail.com")
         self.smtp_port = smtp_port or int(os.getenv("SMTP_PORT", "587"))
-        self.sender_email = EMAIL_SENDER or os.getenv("EMAIL_SENDER", "logistics@company.com")
+        self.sender_email = EMAIL_SENDER or os.getenv("EMAIL_SENDER", "outbound@prostech.vn")
         self.sender_password = EMAIL_PASSWORD or os.getenv("EMAIL_PASSWORD", "")
         
         # Log configuration
         logger.info(f"Email sender initialized with: {self.sender_email} via {self.smtp_host}:{self.smtp_port}")
+    
+    def create_overdue_alerts_html(self, delivery_df, sales_name):
+        """Create HTML content for overdue alerts email (NEW)"""
+        
+        # Ensure delivery_date is datetime
+        delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
+        
+        # Separate overdue and due today
+        overdue_df = delivery_df[delivery_df['delivery_timeline_status'] == 'Overdue'].copy()
+        due_today_df = delivery_df[delivery_df['delivery_timeline_status'] == 'Due Today'].copy()
+        
+        # Calculate summary statistics
+        total_overdue = overdue_df['delivery_id'].nunique() if not overdue_df.empty else 0
+        total_due_today = due_today_df['delivery_id'].nunique() if not due_today_df.empty else 0
+        max_days_overdue = overdue_df['days_overdue'].max() if not overdue_df.empty and 'days_overdue' in overdue_df.columns else 0
+        
+        # Out of stock products
+        out_of_stock_products = 0
+        if 'product_fulfillment_status' in delivery_df.columns:
+            out_of_stock_products = delivery_df[delivery_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
+        
+        # Start HTML
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                }}
+                .header {{
+                    background-color: #d32f2f;
+                    color: white;
+                    padding: 20px;
+                    text-align: center;
+                }}
+                .content {{
+                    padding: 20px;
+                }}
+                .alert-box {{
+                    background-color: #ffebee;
+                    border: 2px solid #ef5350;
+                    border-radius: 5px;
+                    padding: 15px;
+                    margin: 20px 0;
+                }}
+                .summary-grid {{
+                    display: table;
+                    width: 100%;
+                    margin: 20px 0;
+                }}
+                .summary-item {{
+                    display: table-cell;
+                    text-align: center;
+                    padding: 10px;
+                }}
+                .metric-value {{
+                    font-size: 36px;
+                    font-weight: bold;
+                    color: #d32f2f;
+                }}
+                .metric-label {{
+                    font-size: 14px;
+                    color: #666;
+                    margin-top: 5px;
+                }}
+                .section-header {{
+                    background-color: #f5f5f5;
+                    padding: 10px;
+                    margin: 20px 0 10px 0;
+                    border-left: 4px solid #d32f2f;
+                    font-weight: bold;
+                    font-size: 18px;
+                }}
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 10px;
+                }}
+                th, td {{
+                    padding: 8px;
+                    text-align: left;
+                    border-bottom: 1px solid #ddd;
+                }}
+                th {{
+                    background-color: #f8f9fa;
+                    font-weight: bold;
+                }}
+                .overdue-row {{
+                    background-color: #ffcccb;
+                }}
+                .due-today-row {{
+                    background-color: #ffe4b5;
+                }}
+                .out-of-stock {{
+                    color: #d32f2f;
+                    font-weight: bold;
+                }}
+                .days-overdue {{
+                    color: #d32f2f;
+                    font-weight: bold;
+                    font-size: 16px;
+                }}
+                .action-box {{
+                    background-color: #e3f2fd;
+                    border: 1px solid #2196f3;
+                    border-radius: 5px;
+                    padding: 15px;
+                    margin: 20px 0;
+                }}
+                .footer {{
+                    margin-top: 30px;
+                    padding: 20px;
+                    background-color: #f8f9fa;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🚨 URGENT DELIVERY ALERT</h1>
+                <p>Immediate Action Required</p>
+            </div>
+            
+            <div class="content">
+                <p>Dear {sales_name},</p>
+                
+                <div class="alert-box">
+                    <strong>⚠️ CRITICAL ALERT:</strong> You have deliveries that require immediate attention. 
+                    Please review the details below and take necessary action to avoid further delays.
+                </div>
+                
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <div class="metric-value">{total_overdue}</div>
+                        <div class="metric-label">Overdue Deliveries</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="metric-value">{total_due_today}</div>
+                        <div class="metric-label">Due Today</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="metric-value">{int(max_days_overdue)}</div>
+                        <div class="metric-label">Max Days Overdue</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="metric-value">{out_of_stock_products}</div>
+                        <div class="metric-label">Out of Stock Products</div>
+                    </div>
+                </div>
+        """
+        
+        # Overdue Section
+        if not overdue_df.empty:
+            html += """
+                <div class="section-header">🔴 OVERDUE DELIVERIES</div>
+                <p>These deliveries are past their expected delivery date and need immediate attention:</p>
+                <table>
+                    <tr>
+                        <th width="80">Days Overdue</th>
+                        <th width="100">Delivery Date</th>
+                        <th width="150">Customer</th>
+                        <th width="150">Ship To</th>
+                        <th width="120">Product</th>
+                        <th width="80">Quantity</th>
+                        <th width="100">Fulfillment</th>
+                        <th width="120">DN Number</th>
+                    </tr>
+            """
+            
+            # Group and sort overdue deliveries
+            overdue_display = overdue_df.sort_values(['days_overdue', 'delivery_date'], ascending=[False, True])
+            
+            for _, row in overdue_display.iterrows():
+                days_overdue = int(row['days_overdue']) if pd.notna(row['days_overdue']) else 0
+                fulfillment_status = row.get('product_fulfillment_status', row.get('fulfillment_status', 'Unknown'))
+                fulfillment_class = 'out-of-stock' if fulfillment_status == 'Out of Stock' else ''
+                
+                html += f"""
+                    <tr class="overdue-row">
+                        <td class="days-overdue">{days_overdue} days</td>
+                        <td>{row['delivery_date'].strftime('%Y-%m-%d')}</td>
+                        <td>{row['customer']}</td>
+                        <td>{row['recipient_company']}</td>
+                        <td>{row['product_pn']}</td>
+                        <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
+                        <td class="{fulfillment_class}">{fulfillment_status}</td>
+                        <td>{row['dn_number']}</td>
+                    </tr>
+                """
+            
+            html += "</table>"
+        
+        # Due Today Section
+        if not due_today_df.empty:
+            html += """
+                <div class="section-header">🟡 DUE TODAY</div>
+                <p>These deliveries are scheduled for today and should be prioritized:</p>
+                <table>
+                    <tr>
+                        <th width="100">Delivery Date</th>
+                        <th width="150">Customer</th>
+                        <th width="150">Ship To</th>
+                        <th width="120">Product</th>
+                        <th width="80">Quantity</th>
+                        <th width="100">Fulfillment</th>
+                        <th width="120">DN Number</th>
+                    </tr>
+            """
+            
+            # Sort by fulfillment status (out of stock first)
+            due_today_display = due_today_df.sort_values(['product_fulfillment_status', 'customer'])
+            
+            for _, row in due_today_display.iterrows():
+                fulfillment_status = row.get('product_fulfillment_status', row.get('fulfillment_status', 'Unknown'))
+                fulfillment_class = 'out-of-stock' if fulfillment_status == 'Out of Stock' else ''
+                
+                html += f"""
+                    <tr class="due-today-row">
+                        <td>{row['delivery_date'].strftime('%Y-%m-%d')}</td>
+                        <td>{row['customer']}</td>
+                        <td>{row['recipient_company']}</td>
+                        <td>{row['product_pn']}</td>
+                        <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
+                        <td class="{fulfillment_class}">{fulfillment_status}</td>
+                        <td>{row['dn_number']}</td>
+                    </tr>
+                """
+            
+            html += "</table>"
+        
+        # Action Items
+        html += """
+            <div class="action-box">
+                <h3>📋 Required Actions:</h3>
+                <ol>
+                    <li><strong>Contact Customers:</strong> Inform customers about delivery delays and provide updated ETAs</li>
+                    <li><strong>Coordinate with Outbound:</strong> Check inventory availability for out-of-stock items</li>
+                    <li><strong>Update Delivery Status:</strong> Ensure all delivery statuses are current in the system</li>
+                    <li><strong>Escalate if Needed:</strong> For deliveries overdue by 5+ days, escalate to management</li>
+                </ol>
+                
+                <p><strong>Logistics Team Contact:</strong><br>
+                📧 Email: outbound@prostech.vn<br>
+                📞 Phone: +84 28 xxxx xxxx</p>
+            </div>
+            
+            <div class="footer">
+                <p>This is an automated urgent alert from Outbound Logistics System</p>
+                <p>Please take immediate action on the items listed above</p>
+                <p>For questions, contact: <a href="mailto:outbound@prostech.vn">outbound@prostech.vn</a></p>
+            </div>
+        </div>
+        </body>
+        </html>
+        """
+        
+        return html
     
     def create_delivery_schedule_html(self, delivery_df, sales_name):
         """Create HTML content for delivery schedule email with enhanced information"""
@@ -376,7 +638,7 @@ class EmailSender:
             
             <div class="footer">
                 <p>This is an automated email from Outbound Logistics System</p>
-                <p>For questions, please contact: <a href="mailto:logistics@company.com">logistics@company.com</a></p>
+                <p>For questions, please contact: <a href="mailto:outbound@prostech.vn">outbound@prostech.vn</a></p>
             </div>
         </div>
         </body>
@@ -385,7 +647,7 @@ class EmailSender:
         
         return html
     
-    def create_excel_attachment(self, delivery_df):
+    def create_excel_attachment(self, delivery_df, notification_type="📅 Delivery Schedule"):
         """Create Excel file as attachment with enhanced information"""
         output = io.BytesIO()
         
@@ -463,30 +725,47 @@ class EmailSender:
         
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             try:
-                # Write main data sheet with line items
-                excel_df.to_excel(writer, sheet_name='Line Items Detail', index=False)
+                # For Overdue Alerts, create different sheets
+                if notification_type == "🚨 Overdue Alerts":
+                    # Separate overdue and due today
+                    overdue_df = excel_df[excel_df['delivery_timeline_status'] == 'Overdue'].copy()
+                    due_today_df = excel_df[excel_df['delivery_timeline_status'] == 'Due Today'].copy()
+                    
+                    # Write overdue sheet
+                    if not overdue_df.empty:
+                        overdue_df = overdue_df.sort_values('days_overdue', ascending=False)
+                        overdue_df.to_excel(writer, sheet_name='Overdue Deliveries', index=False)
+                    
+                    # Write due today sheet
+                    if not due_today_df.empty:
+                        due_today_df.to_excel(writer, sheet_name='Due Today', index=False)
+                    
+                    # Create summary sheet
+                    summary_df = self._create_urgent_summary_sheet(delivery_df)
+                    summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                else:
+                    # Regular delivery schedule sheets
+                    excel_df.to_excel(writer, sheet_name='Line Items Detail', index=False)
+                    
+                    # Create summary sheet
+                    summary_df = self._create_summary_sheet(delivery_df)
+                    summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                    
+                    # Create product analysis sheet (only if columns exist)
+                    if 'product_gap_quantity' in delivery_df.columns:
+                        try:
+                            product_analysis_df = self._create_product_analysis_sheet(delivery_df)
+                            product_analysis_df.to_excel(writer, sheet_name='Product Analysis', index=False)
+                        except Exception as e:
+                            logger.warning(f"Could not create Product Analysis sheet: {e}")
                 
-                # Create summary sheet
-                summary_df = self._create_summary_sheet(delivery_df)
-                summary_df.to_excel(writer, sheet_name='Summary', index=False)
-                
-                # Create product analysis sheet (NEW) - only if columns exist
-                if 'product_gap_quantity' in delivery_df.columns:
-                    try:
-                        product_analysis_df = self._create_product_analysis_sheet(delivery_df)
-                        product_analysis_df.to_excel(writer, sheet_name='Product Analysis', index=False)
-                    except Exception as e:
-                        logger.warning(f"Could not create Product Analysis sheet: {e}")
-                
-                # Get workbook and worksheets
+                # Get workbook and apply formatting
                 workbook = writer.book
-                detail_worksheet = writer.sheets['Line Items Detail']
-                summary_worksheet = writer.sheets['Summary']
                 
                 # Define formats
                 header_format = workbook.add_format({
                     'bold': True,
-                    'bg_color': '#1f77b4',
+                    'bg_color': '#1f77b4' if notification_type == "📅 Delivery Schedule" else '#d32f2f',
                     'font_color': 'white',
                     'border': 1,
                     'text_wrap': True,
@@ -520,89 +799,57 @@ class EmailSender:
                     'border': 1
                 })
                 
-                epe_format = workbook.add_format({
-                    'bg_color': '#e3f2fd',
-                    'font_color': '#1976d2',
-                    'bold': True,
-                    'border': 1
-                })
-                
-                # Format Line Items Detail sheet
-                # Apply header format
-                for col_num, value in enumerate(excel_df.columns.values):
-                    detail_worksheet.write(0, col_num, value, header_format)
-                
-                # Set column widths and apply formatting
-                for idx, column in enumerate(excel_df.columns):
-                    # Calculate column width
-                    max_len = max(
-                        excel_df[column].astype(str).map(len).max(),
-                        len(column)
-                    ) + 2
+                # Apply formatting to all sheets
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
                     
-                    # Set specific widths for certain columns
-                    if column == 'recipient_address':
-                        max_len = min(max_len, 40)
-                    elif column in ['product_pn', 'product_id']:
-                        max_len = min(max_len, 25)
-                    else:
-                        max_len = min(max_len, 20)
+                    # Set column widths and formatting
+                    worksheet.set_column(0, 50, 15)  # Default width
                     
-                    detail_worksheet.set_column(idx, idx, max_len)
+                    # Freeze first row
+                    worksheet.freeze_panes(1, 0)
                     
-                    # Apply number format to quantity columns
-                    if 'quantity' in column.lower() or column in ['standard_quantity', 'remaining_quantity_to_deliver', 
-                                                                  'gap_quantity', 'product_gap_quantity']:
-                        detail_worksheet.set_column(idx, idx, max_len, number_format)
-                    
-                    # Apply percent format
-                    if 'percent' in column.lower() or 'rate' in column.lower():
-                        detail_worksheet.set_column(idx, idx, max_len, percent_format)
+                    # Add filters
+                    if sheet_name in ['Line Items Detail', 'Overdue Deliveries', 'Due Today']:
+                        last_row = len(excel_df) if sheet_name == 'Line Items Detail' else len(overdue_df) + len(due_today_df)
+                        last_col = len(final_columns) - 1
+                        worksheet.autofilter(0, 0, last_row, last_col)
                 
-                # Apply conditional formatting for urgent items
-                if 'delivery_timeline_status' in excel_df.columns:
-                    timeline_col = excel_df.columns.get_loc('delivery_timeline_status')
-                    for row_num in range(1, len(excel_df) + 1):
-                        if excel_df.iloc[row_num - 1]['delivery_timeline_status'] == 'Overdue':
-                            detail_worksheet.write(row_num, timeline_col, 'Overdue', overdue_format)
-                
-                if 'product_fulfillment_status' in excel_df.columns:
-                    status_col = excel_df.columns.get_loc('product_fulfillment_status')
-                    for row_num in range(1, len(excel_df) + 1):
-                        if excel_df.iloc[row_num - 1]['product_fulfillment_status'] in ['Out of Stock', 'Can Fulfill Partial']:
-                            detail_worksheet.set_row(row_num, None, urgent_format)
-                
-                # Highlight EPE companies
-                if 'is_epe_company' in excel_df.columns:
-                    epe_col = excel_df.columns.get_loc('is_epe_company')
-                    for row_num in range(1, len(excel_df) + 1):
-                        if excel_df.iloc[row_num - 1]['is_epe_company'] == 'Yes':
-                            detail_worksheet.write(row_num, epe_col, 'Yes', epe_format)
-                
-                # Add filters
-                detail_worksheet.autofilter(0, 0, len(excel_df), len(excel_df.columns) - 1)
-                
-                # Freeze panes (freeze first row and first 3 columns)
-                detail_worksheet.freeze_panes(1, 3)
-                
-                # Format Summary sheet
-                for col_num, value in enumerate(summary_df.columns.values):
-                    summary_worksheet.write(0, col_num, value, header_format)
-                
-                # Auto-adjust summary columns
-                for idx, column in enumerate(summary_df.columns):
-                    max_len = max(
-                        summary_df[column].astype(str).map(len).max(),
-                        len(column)
-                    ) + 2
-                    summary_worksheet.set_column(idx, idx, min(max_len, 30))
-                    
             except Exception as e:
                 logger.error(f"Error creating Excel sheets: {e}")
                 raise
         
         output.seek(0)
         return output
+    
+    def _create_urgent_summary_sheet(self, delivery_df):
+        """Create summary sheet for urgent alerts (NEW)"""
+        # Remove duplicate columns first
+        delivery_df_clean = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
+        
+        # Calculate summary by customer and status
+        summary_data = []
+        
+        # Group by customer and timeline status
+        for (customer, status), group_df in delivery_df_clean.groupby(['customer', 'delivery_timeline_status']):
+            summary_data.append({
+                'Customer': customer,
+                'Status': status,
+                'Deliveries': group_df['delivery_id'].nunique(),
+                'Line Items': len(group_df),
+                'Total Quantity': group_df['remaining_quantity_to_deliver'].sum(),
+                'Max Days Overdue': group_df['days_overdue'].max() if status == 'Overdue' else 0,
+                'Out of Stock Products': group_df[group_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
+            })
+        
+        summary_df = pd.DataFrame(summary_data)
+        
+        # Sort by status (Overdue first) and days overdue
+        summary_df['Status_Sort'] = summary_df['Status'].map({'Overdue': 0, 'Due Today': 1})
+        summary_df = summary_df.sort_values(['Status_Sort', 'Max Days Overdue'], ascending=[True, False])
+        summary_df = summary_df.drop('Status_Sort', axis=1)
+        
+        return summary_df
     
     def _create_summary_sheet(self, delivery_df):
         """Create summary data for Excel"""
@@ -661,7 +908,7 @@ class EmailSender:
         return summary
     
     def _create_product_analysis_sheet(self, delivery_df):
-        """Create product analysis sheet for Excel (NEW)"""
+        """Create product analysis sheet for Excel"""
         # Remove duplicate columns first
         delivery_df_clean = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
         
@@ -694,7 +941,7 @@ class EmailSender:
         
         return product_analysis
     
-    def send_delivery_schedule_email(self, recipient_email, sales_name, delivery_df, cc_emails=None):
+    def send_delivery_schedule_email(self, recipient_email, sales_name, delivery_df, cc_emails=None, notification_type="📅 Delivery Schedule"):
         """Send delivery schedule email with enhanced content"""
         try:
             # Check email configuration
@@ -712,27 +959,47 @@ class EmailSender:
             
             # Create message
             msg = MIMEMultipart('alternative')
-            msg['Subject'] = f"Delivery Schedule - Next 4 Weeks - {sales_name}"
+            
+            # Set subject based on notification type
+            if notification_type == "🚨 Overdue Alerts":
+                # Count overdue and due today
+                overdue_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
+                due_today_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Due Today']['delivery_id'].nunique()
+                msg['Subject'] = f"🚨 URGENT: {overdue_count} Overdue & {due_today_count} Due Today Deliveries - {sales_name}"
+            else:
+                msg['Subject'] = f"Delivery Schedule - Next 4 Weeks - {sales_name}"
+            
             msg['From'] = self.sender_email
             msg['To'] = recipient_email
             
             if cc_emails:
                 msg['Cc'] = ', '.join(cc_emails)
             
-            # Create HTML content
-            html_content = self.create_delivery_schedule_html(delivery_df, sales_name)
+            # Create HTML content based on notification type
+            if notification_type == "🚨 Overdue Alerts":
+                html_content = self.create_overdue_alerts_html(delivery_df, sales_name)
+            else:
+                html_content = self.create_delivery_schedule_html(delivery_df, sales_name)
+            
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
             
             # Create Excel attachment
             try:
-                excel_data = self.create_excel_attachment(delivery_df)
+                excel_data = self.create_excel_attachment(delivery_df, notification_type)
                 excel_part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                 excel_part.set_payload(excel_data.read())
                 encoders.encode_base64(excel_part)
+                
+                # Set filename based on notification type
+                if notification_type == "🚨 Overdue Alerts":
+                    filename = f"urgent_deliveries_{sales_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                else:
+                    filename = f"delivery_schedule_{sales_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                
                 excel_part.add_header(
                     'Content-Disposition',
-                    f'attachment; filename="delivery_schedule_{sales_name}_{datetime.now().strftime("%Y%m%d")}.xlsx"'
+                    f'attachment; filename="{filename}"'
                 )
                 msg.attach(excel_part)
             except Exception as e:
@@ -740,26 +1007,27 @@ class EmailSender:
                 # Continue without Excel attachment
                 return False, f"Error creating Excel attachment: {str(e)}"
             
-            # Create ICS calendar attachment
-            try:
-                calendar_gen = CalendarEventGenerator()
-                ics_content = calendar_gen.create_ics_content(sales_name, delivery_df, self.sender_email)
-                
-                if ics_content:  # Check if content was generated
-                    ics_part = MIMEBase('text', 'calendar')
-                    ics_part.set_payload(ics_content.encode('utf-8'))
-                    encoders.encode_base64(ics_part)
-                    ics_part.add_header(
-                        'Content-Disposition',
-                        f'attachment; filename="delivery_schedule_{sales_name}_{datetime.now().strftime("%Y%m%d")}.ics"'
-                    )
-                    msg.attach(ics_part)
-            except Exception as e:
-                logger.warning(f"Error creating calendar attachment: {e}")
-                # Continue without calendar attachment
+            # Create ICS calendar attachment (only for delivery schedule)
+            if notification_type == "📅 Delivery Schedule":
+                try:
+                    calendar_gen = CalendarEventGenerator()
+                    ics_content = calendar_gen.create_ics_content(sales_name, delivery_df, self.sender_email)
+                    
+                    if ics_content:  # Check if content was generated
+                        ics_part = MIMEBase('text', 'calendar')
+                        ics_part.set_payload(ics_content.encode('utf-8'))
+                        encoders.encode_base64(ics_part)
+                        ics_part.add_header(
+                            'Content-Disposition',
+                            f'attachment; filename="delivery_schedule_{sales_name}_{datetime.now().strftime("%Y%m%d")}.ics"'
+                        )
+                        msg.attach(ics_part)
+                except Exception as e:
+                    logger.warning(f"Error creating calendar attachment: {e}")
+                    # Continue without calendar attachment
             
             # Send email
-            logger.info(f"Attempting to send email to {recipient_email}...")
+            logger.info(f"Attempting to send {notification_type} email to {recipient_email}...")
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
                 server.starttls()
                 server.login(self.sender_email, self.sender_password)
