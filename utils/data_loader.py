@@ -19,7 +19,7 @@ class DeliveryDataLoader:
     def load_delivery_data(_self, filters=None):
         """Load delivery data from delivery_full_view"""
         try:
-            # Base query
+            # Base query - Updated with new fields
             query = """
             SELECT 
                 delivery_id,
@@ -28,11 +28,15 @@ class DeliveryDataLoader:
                 created_by_name,
                 created_date,
                 shipment_status,
+                shipment_status_vn,
                 dispatched_date,
                 delivered_date,
                 sto_delivery_status,
                 sto_etd_date,
                 is_delivered,
+                delivery_confirmed,
+                delivery_timeline_status,
+                days_overdue,
                 notify_email,
                 reference_packing_list,
                 shipping_cost,
@@ -57,12 +61,26 @@ class DeliveryDataLoader:
                 
                 -- Stock info
                 sto_dr_line_id,
+                selling_stock_out_quantity,
+                selling_stock_out_request_quantity,
+                stock_out_quantity,
+                stock_out_request_quantity,
+                stockin_line_id,
+                export_tax,
                 remaining_quantity_to_deliver,
                 total_instock_at_preferred_warehouse,
                 total_instock_all_warehouses,
                 gap_quantity,
                 fulfill_rate_percent,
                 fulfillment_status,
+                
+                -- New accurate gap analysis fields
+                product_total_remaining_demand,
+                product_active_delivery_count,
+                product_gap_quantity,
+                product_fulfill_rate_percent,
+                delivery_demand_percentage,
+                product_fulfillment_status,
                 
                 -- Customer info
                 customer,
@@ -151,6 +169,11 @@ class DeliveryDataLoader:
                         query += " AND customer_country_code != legal_entity_country_code"
                     elif filters['foreign_filter'] == 'Domestic Only':
                         query += " AND customer_country_code = legal_entity_country_code"
+                
+                # Timeline status filter (new)
+                if filters.get('timeline_status'):
+                    query += " AND delivery_timeline_status IN :timeline_status"
+                    params['timeline_status'] = tuple(filters['timeline_status'])
             
             # Order by
             query += " ORDER BY delivery_id DESC, sto_dr_line_id DESC"
@@ -176,7 +199,8 @@ class DeliveryDataLoader:
                 'ship_to_companies': "SELECT DISTINCT recipient_company FROM delivery_full_view WHERE recipient_company IS NOT NULL ORDER BY recipient_company",
                 'states': "SELECT DISTINCT recipient_state_province FROM delivery_full_view WHERE recipient_state_province IS NOT NULL ORDER BY recipient_state_province",
                 'countries': "SELECT DISTINCT recipient_country_name FROM delivery_full_view WHERE recipient_country_name IS NOT NULL ORDER BY recipient_country_name",
-                'statuses': "SELECT DISTINCT shipment_status FROM delivery_full_view WHERE shipment_status IS NOT NULL ORDER BY shipment_status"
+                'statuses': "SELECT DISTINCT shipment_status FROM delivery_full_view WHERE shipment_status IS NOT NULL ORDER BY shipment_status",
+                'timeline_statuses': "SELECT DISTINCT delivery_timeline_status FROM delivery_full_view WHERE delivery_timeline_status IS NOT NULL ORDER BY delivery_timeline_status"
             }
             
             options = {}
@@ -211,16 +235,19 @@ class DeliveryDataLoader:
                 df['period'] = df['etd'].dt.to_period('M').dt.start_time
                 period_format = '%B %Y'
             
-            # Group by period and aggregate
+            # Group by period and aggregate - include new gap analysis
             pivot_df = df.groupby(['period', 'customer', 'recipient_company']).agg({
                 'delivery_id': 'count',
                 'standard_quantity': 'sum',
                 'remaining_quantity_to_deliver': 'sum',
-                'gap_quantity': 'sum'
+                'gap_quantity': 'sum',
+                'product_gap_quantity': 'sum',  # New accurate gap
+                'product_total_remaining_demand': 'sum'  # Total demand
             }).reset_index()
             
             pivot_df.columns = ['Period', 'Customer', 'Ship To', 'Deliveries', 
-                               'Total Quantity', 'Remaining to Deliver', 'Gap']
+                               'Total Quantity', 'Remaining to Deliver', 'Gap (Legacy)',
+                               'Product Gap', 'Total Product Demand']
             
             # Format period
             pivot_df['Period'] = pd.to_datetime(pivot_df['Period']).dt.strftime(period_format)
@@ -265,8 +292,16 @@ class DeliveryDataLoader:
                 remaining_quantity_to_deliver,
                 total_instock_at_preferred_warehouse,
                 gap_quantity,
+                product_gap_quantity,
+                product_total_remaining_demand,
+                product_fulfill_rate_percent,
+                delivery_demand_percentage,
                 shipment_status,
+                shipment_status_vn,
                 fulfillment_status,
+                product_fulfillment_status,
+                delivery_timeline_status,
+                days_overdue,
                 preferred_warehouse,
                 is_epe_company,
                 legal_entity,
@@ -287,8 +322,14 @@ class DeliveryDataLoader:
                     'end_date': end_date
                 })
             
-            # Add backward compatibility
+            # Debug: Check for duplicate columns
             if not df.empty:
+                duplicate_cols = df.columns[df.columns.duplicated()].tolist()
+                if duplicate_cols:
+                    logger.warning(f"Duplicate columns found in sales delivery summary: {duplicate_cols}")
+                    # Remove duplicates
+                    df = df.loc[:, ~df.columns.duplicated()]
+                
                 # Add total_quantity as alias for remaining_quantity_to_deliver
                 df['total_quantity'] = df['remaining_quantity_to_deliver']
             
@@ -296,4 +337,73 @@ class DeliveryDataLoader:
             
         except Exception as e:
             logger.error(f"Error getting sales delivery summary: {e}")
+            return pd.DataFrame()
+    
+    def get_overdue_deliveries(self):
+        """Get overdue deliveries that need attention"""
+        try:
+            query = text("""
+            SELECT 
+                delivery_id,
+                dn_number,
+                customer,
+                recipient_company,
+                etd,
+                days_overdue,
+                remaining_quantity_to_deliver,
+                shipment_status,
+                shipment_status_vn,
+                fulfillment_status,
+                product_fulfillment_status,
+                created_by_name,
+                is_epe_company
+            FROM delivery_full_view
+            WHERE delivery_timeline_status = 'Overdue'
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'ON_DELIVERY', 'DISPATCHED')
+            ORDER BY days_overdue DESC, delivery_id DESC
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting overdue deliveries: {e}")
+            return pd.DataFrame()
+    
+    def get_product_demand_analysis(self, product_id=None):
+        """Get product demand analysis with accurate gap calculation"""
+        try:
+            query = """
+            SELECT 
+                product_pn,
+                product_id,
+                COUNT(DISTINCT delivery_id) as active_deliveries,
+                SUM(remaining_quantity_to_deliver) as total_remaining_demand,
+                MAX(total_instock_all_warehouses) as total_inventory,
+                MAX(product_gap_quantity) as gap_quantity,
+                MAX(product_fulfill_rate_percent) as fulfill_rate,
+                MAX(product_fulfillment_status) as fulfillment_status,
+                GROUP_CONCAT(DISTINCT customer SEPARATOR ', ') as customers
+            FROM delivery_full_view
+            WHERE remaining_quantity_to_deliver > 0
+                AND shipment_status != 'DELIVERED'
+            """
+            
+            params = {}
+            if product_id:
+                query += " AND product_id = :product_id"
+                params['product_id'] = product_id
+            
+            query += " GROUP BY product_pn, product_id ORDER BY total_remaining_demand DESC"
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(text(query), conn, params=params)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting product demand analysis: {e}")
             return pd.DataFrame()

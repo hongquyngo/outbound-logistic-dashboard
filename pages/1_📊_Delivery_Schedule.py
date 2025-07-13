@@ -25,7 +25,7 @@ if not auth_manager.check_session():
 data_loader = DeliveryDataLoader()
 
 st.title("📊 Delivery Schedule")
-st.markdown("---")
+# st.markdown("---")
 
 # Filter Section
 with st.expander("🔍 Filters", expanded=True):
@@ -117,8 +117,14 @@ with st.expander("🔍 Filters", expanded=True):
         )
 
     with col6:
-        # Additional filter or spacing
-        st.empty()  # For layout balance
+        # Timeline status filter (NEW)
+        selected_timeline = st.multiselect(
+            "Delivery Timeline Status",
+            options=filter_options.get('timeline_statuses', []),
+            default=None,
+            placeholder="All statuses",
+            help="Filter by delivery timeline: Overdue, Due Today, On Schedule, Completed"
+        )
 
 # Apply filters button
 if st.button("🔄 Apply Filters", type="primary", use_container_width=True):
@@ -134,7 +140,8 @@ filters = {
     'states': selected_states if selected_states else None,
     'countries': selected_countries if selected_countries else None,
     'epe_filter': epe_filter,
-    'foreign_filter': foreign_filter
+    'foreign_filter': foreign_filter,
+    'timeline_status': selected_timeline if selected_timeline else None
 }
 
 # Load data
@@ -142,8 +149,8 @@ with st.spinner("Loading delivery data..."):
     df = data_loader.load_delivery_data(filters)
 
 if df is not None and not df.empty:
-    # Display metrics
-    col1, col2, col3, col4 = st.columns(4)
+    # Display enhanced metrics
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric("Total Deliveries", f"{df['delivery_id'].nunique():,}")
@@ -159,7 +166,33 @@ if df is not None and not df.empty:
         remaining_qty = df['remaining_quantity_to_deliver'].sum()
         st.metric("Remaining to Deliver", f"{remaining_qty:,.0f}")
     
-    st.markdown("---")
+    with col5:
+        # New metric: Overdue deliveries
+        overdue_count = df[df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
+        st.metric("Overdue Deliveries", f"{overdue_count:,}", 
+                 delta_color="inverse" if overdue_count > 0 else "off")
+    
+    # Additional metrics row (NEW)
+    with st.expander("📊 Advanced Metrics", expanded=False):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            avg_fulfill_rate = df['product_fulfill_rate_percent'].mean()
+            st.metric("Avg Product Fulfillment Rate", f"{avg_fulfill_rate:.1f}%")
+        
+        with col2:
+            unique_products = df['product_pn'].nunique()
+            st.metric("Unique Products", f"{unique_products:,}")
+        
+        with col3:
+            out_of_stock = df[df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
+            st.metric("Products Out of Stock", f"{out_of_stock:,}")
+        
+        with col4:
+            total_gap = df.groupby('product_id')['product_gap_quantity'].first().sum()
+            st.metric("Total Product Gap", f"{abs(total_gap):,.0f}")
+    
+    # st.markdown("---")
     
     # Pivot view
     st.subheader(f"📅 Delivery Schedule - {view_period.capitalize()} View")
@@ -169,7 +202,7 @@ if df is not None and not df.empty:
     
     if not pivot_df.empty:
         # Create tabs for different views
-        tab1, tab2, tab3 = st.tabs(["📊 Pivot Table", "📈 Charts", "📋 Detailed List"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Pivot Table", "📈 Charts", "📋 Detailed List", "🔍 Product Analysis"])
         
         with tab1:
             # Pivot table view
@@ -202,83 +235,76 @@ if df is not None and not df.empty:
             col1, col2 = st.columns(2)
             
             with col1:
-                # Timeline chart
-                timeline_df = df.groupby(pd.to_datetime(df['etd']).dt.date).agg({
-                    'delivery_id': 'nunique',
-                    'standard_quantity': 'sum'
+                # Timeline chart with status breakdown
+                timeline_df = df.groupby([pd.to_datetime(df['etd']).dt.date, 'delivery_timeline_status']).agg({
+                    'delivery_id': 'nunique'
                 }).reset_index()
-                timeline_df.columns = ['Date', 'Deliveries', 'Quantity']
+                timeline_df.columns = ['Date', 'Status', 'Count']
                 
-                fig1 = go.Figure()
-                fig1.add_trace(go.Bar(
-                    x=timeline_df['Date'],
-                    y=timeline_df['Deliveries'],
-                    name='Deliveries',
-                    yaxis='y',
-                    marker_color='lightblue'
-                ))
-                fig1.add_trace(go.Scatter(
-                    x=timeline_df['Date'],
-                    y=timeline_df['Quantity'],
-                    name='Quantity',
-                    yaxis='y2',
-                    marker_color='darkblue'
-                ))
-                fig1.update_layout(
-                    title='Delivery Timeline',
-                    yaxis=dict(title='Number of Deliveries', side='left'),
-                    yaxis2=dict(title='Total Quantity', side='right', overlaying='y'),
-                    hovermode='x unified'
+                fig1 = px.bar(
+                    timeline_df,
+                    x='Date',
+                    y='Count',
+                    color='Status',
+                    title='Delivery Timeline Status',
+                    color_discrete_map={
+                        'Completed': '#2ecc71',
+                        'On Schedule': '#3498db',
+                        'Due Today': '#f39c12',
+                        'Overdue': '#e74c3c',
+                        'No ETD': '#95a5a6'
+                    }
                 )
                 st.plotly_chart(fig1, use_container_width=True)
             
             with col2:
-                # Status distribution
-                status_df = df.groupby('fulfillment_status')['delivery_id'].nunique().reset_index()
-                status_df.columns = ['Status', 'Count']
+                # Product fulfillment status distribution
+                fulfillment_df = df.groupby('product_fulfillment_status')['product_pn'].nunique().reset_index()
+                fulfillment_df.columns = ['Status', 'Product Count']
                 
                 fig2 = px.pie(
-                    status_df, 
-                    values='Count', 
+                    fulfillment_df, 
+                    values='Product Count', 
                     names='Status',
-                    title='Fulfillment Status Distribution',
+                    title='Product Fulfillment Status',
                     color_discrete_map={
-                        'Fulfilled': '#2ecc71',
-                        'Partial Fulfilled': '#f39c12',
+                        'Can Fulfill All': '#2ecc71',
+                        'Can Fulfill Partial': '#f39c12',
                         'Out of Stock': '#e74c3c',
-                        'No Remaining': '#95a5a6'
+                        'Ready to Ship': '#3498db',
+                        'Delivered': '#95a5a6'
                     }
                 )
                 st.plotly_chart(fig2, use_container_width=True)
             
-            # Geographic distribution
-            if 'recipient_country_name' in df.columns:
-                geo_df = df.groupby('recipient_country_name')['delivery_id'].nunique().reset_index()
-                geo_df.columns = ['Country', 'Deliveries']
-                geo_df = geo_df.sort_values('Deliveries', ascending=False).head(15)
-                
-                fig3 = px.bar(
-                    geo_df,
-                    x='Deliveries',
-                    y='Country',
-                    orientation='h',
-                    title='Top 15 Delivery Destinations',
-                    color='Deliveries',
-                    color_continuous_scale='Blues'
+            # Days overdue distribution (NEW)
+            overdue_df = df[df['days_overdue'].notna()].copy()
+            if not overdue_df.empty:
+                fig3 = px.histogram(
+                    overdue_df,
+                    x='days_overdue',
+                    nbins=20,
+                    title='Distribution of Overdue Days',
+                    labels={'days_overdue': 'Days Overdue', 'count': 'Number of Deliveries'}
                 )
+                fig3.update_traces(marker_color='#e74c3c')
                 st.plotly_chart(fig3, use_container_width=True)
         
         with tab3:
             # Detailed list
             st.subheader("📋 Detailed Delivery List")
             
-            # Select columns to display
+            # Select columns to display - Updated with new fields
+            default_columns = ['dn_number', 'customer', 'recipient_company', 'etd', 
+                             'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
+                             'product_fulfill_rate_percent', 'delivery_timeline_status',
+                             'days_overdue', 'shipment_status_vn', 'product_fulfillment_status', 
+                             'is_epe_company']
+            
             display_columns = st.multiselect(
                 "Select columns to display",
                 options=df.columns.tolist(),
-                default=['dn_number', 'customer', 'recipient_company', 'etd', 
-                        'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
-                        'fulfillment_status', 'shipment_status', 'is_epe_company']
+                default=[col for col in default_columns if col in df.columns]
             )
             
             if display_columns:
@@ -291,12 +317,23 @@ if df is not None and not df.empty:
                         display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%Y-%m-%d')
                 
                 # Apply conditional formatting
+                def highlight_timeline(val):
+                    if val == 'Overdue':
+                        return 'background-color: #ffcccb'
+                    elif val == 'Due Today':
+                        return 'background-color: #ffe4b5'
+                    elif val == 'On Schedule':
+                        return 'background-color: #90ee90'
+                    elif val == 'Completed':
+                        return 'background-color: #e0e0e0'
+                    return ''
+                
                 def highlight_fulfillment(val):
                     if val == 'Out of Stock':
                         return 'background-color: #ffcccb'
-                    elif val == 'Partial Fulfilled':
+                    elif val == 'Can Fulfill Partial':
                         return 'background-color: #ffe4b5'
-                    elif val == 'Fulfilled':
+                    elif val == 'Can Fulfill All':
                         return 'background-color: #90ee90'
                     return ''
                 
@@ -307,10 +344,16 @@ if df is not None and not df.empty:
                 
                 styled_df = display_df.style
                 
-                if 'fulfillment_status' in display_df.columns:
+                if 'delivery_timeline_status' in display_df.columns:
                     styled_df = styled_df.applymap(
-                        highlight_fulfillment, 
-                        subset=['fulfillment_status']
+                        highlight_timeline, 
+                        subset=['delivery_timeline_status']
+                    )
+                
+                if 'product_fulfillment_status' in display_df.columns:
+                    styled_df = styled_df.applymap(
+                        highlight_fulfillment,
+                        subset=['product_fulfillment_status']
                     )
                 
                 if 'is_epe_company' in display_df.columns:
@@ -320,8 +363,68 @@ if df is not None and not df.empty:
                     )
                 
                 st.dataframe(styled_df, use_container_width=True)
+        
+        with tab4:
+            # Product Analysis tab (NEW)
+            st.subheader("🔍 Product Demand Analysis")
+            
+            # Get product demand analysis
+            product_analysis = data_loader.get_product_demand_analysis()
+            
+            if not product_analysis.empty:
+                # Show top products with gaps
+                st.markdown("#### Top Products by Demand Gap")
+                gap_products = product_analysis[product_analysis['gap_quantity'] > 0].head(10)
+                
+                if not gap_products.empty:
+                    fig4 = px.bar(
+                        gap_products,
+                        x='product_pn',
+                        y='gap_quantity',
+                        title='Top 10 Products with Supply Gap',
+                        labels={'gap_quantity': 'Gap Quantity', 'product_pn': 'Product'},
+                        color='fulfill_rate',
+                        color_continuous_scale='RdYlGn'
+                    )
+                    st.plotly_chart(fig4, use_container_width=True)
+                
+                # Product demand details
+                st.markdown("#### Product Demand Details")
+                st.dataframe(
+                    product_analysis[['product_pn', 'active_deliveries', 'total_remaining_demand',
+                                    'total_inventory', 'gap_quantity', 'fulfill_rate', 
+                                    'fulfillment_status']].style.format({
+                        'total_remaining_demand': '{:,.0f}',
+                        'total_inventory': '{:,.0f}',
+                        'gap_quantity': '{:,.0f}',
+                        'fulfill_rate': '{:.1f}%'
+                    }).background_gradient(subset=['fulfill_rate'], cmap='RdYlGn'),
+                    use_container_width=True
+                )
 else:
     st.info("No delivery data found for the selected filters")
+
+# Show overdue deliveries alert (NEW)
+if df is not None and not df.empty:
+    overdue_df = df[df['delivery_timeline_status'] == 'Overdue']
+    if not overdue_df.empty:
+        with st.expander("⚠️ Overdue Deliveries Alert", expanded=True):
+            st.warning(f"There are {overdue_df['delivery_id'].nunique()} overdue deliveries requiring attention!")
+            
+            # Show summary of overdue deliveries
+            overdue_summary = overdue_df.groupby(['customer', 'recipient_company']).agg({
+                'delivery_id': 'nunique',
+                'days_overdue': 'max',
+                'remaining_quantity_to_deliver': 'sum'
+            }).reset_index()
+            overdue_summary.columns = ['Customer', 'Ship To', 'Deliveries', 'Max Days Overdue', 'Total Qty']
+            
+            st.dataframe(
+                overdue_summary.style.format({
+                    'Total Qty': '{:,.0f}'
+                }).background_gradient(subset=['Max Days Overdue'], cmap='Reds'),
+                use_container_width=True
+            )
 
 # Add footer
 st.markdown("---")

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 from utils.auth import AuthManager
 from utils.data_loader import DeliveryDataLoader
+import plotly.graph_objects as go
 import logging
 
 # Configure logging
@@ -19,8 +20,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# App version
-APP_VERSION = "1.1.0"
+# App version - Updated
+APP_VERSION = "1.2.0"
 
 # Initialize auth manager
 auth_manager = AuthManager()
@@ -51,6 +52,25 @@ st.markdown("""
         font-size: 1rem;
         color: #666;
         margin-top: 0.5rem;
+    }
+    .alert-card {
+        background-color: #fff3cd;
+        border: 1px solid #ffeeba;
+        color: #856404;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
+    .status-overdue {
+        color: #d32f2f;
+        font-weight: bold;
+    }
+    .status-due-today {
+        color: #f57c00;
+        font-weight: bold;
+    }
+    .status-on-schedule {
+        color: #388e3c;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -90,6 +110,9 @@ def show_main_dashboard():
         # Navigation info
         st.info("📌 Use the navigation menu above to access different sections")
         
+        # App version
+        st.caption(f"Version: {APP_VERSION}")
+        
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True):
             auth_manager.logout()
@@ -117,10 +140,11 @@ def show_main_dashboard():
             this_week_df = df[(df['etd'].dt.date >= week_start) & (df['etd'].dt.date <= week_end)]
             this_month_df = df[df['etd'].dt.date >= month_start]
             pending_df = df[df['shipment_status'].isin(['PENDING', 'PROCESSING'])]
-            overdue_df = df[(df['etd'].dt.date < today) & (df['is_delivered'] == 0)]
+            overdue_df = df[df['delivery_timeline_status'] == 'Overdue']
+            due_today_df = df[df['delivery_timeline_status'] == 'Due Today']
             
-            # KPI Cards
-            col1, col2, col3, col4 = st.columns(4)
+            # Enhanced KPI Cards - Row 1
+            col1, col2, col3, col4, col5 = st.columns(5)
             
             with col1:
                 st.markdown("""
@@ -128,7 +152,7 @@ def show_main_dashboard():
                     <div class="kpi-value">{:,}</div>
                     <div class="kpi-label">This Week Deliveries</div>
                 </div>
-                """.format(len(this_week_df)), unsafe_allow_html=True)
+                """.format(this_week_df['delivery_id'].nunique()), unsafe_allow_html=True)
             
             with col2:
                 st.markdown("""
@@ -136,7 +160,7 @@ def show_main_dashboard():
                     <div class="kpi-value">{:,}</div>
                     <div class="kpi-label">This Month Deliveries</div>
                 </div>
-                """.format(len(this_month_df)), unsafe_allow_html=True)
+                """.format(this_month_df['delivery_id'].nunique()), unsafe_allow_html=True)
             
             with col3:
                 st.markdown("""
@@ -152,43 +176,143 @@ def show_main_dashboard():
                     <div class="kpi-value" style="color: #ff4444;">{:,}</div>
                     <div class="kpi-label">Overdue Deliveries</div>
                 </div>
-                """.format(len(overdue_df)), unsafe_allow_html=True)
+                """.format(overdue_df['delivery_id'].nunique()), unsafe_allow_html=True)
+            
+            with col5:
+                st.markdown("""
+                <div class="kpi-card">
+                    <div class="kpi-value" style="color: #f39c12;">{:,}</div>
+                    <div class="kpi-label">Due Today</div>
+                </div>
+                """.format(due_today_df['delivery_id'].nunique()), unsafe_allow_html=True)
             
             st.markdown("---")
             
-            # Quick Stats by Status
+            # Alert Section (NEW)
+            if not overdue_df.empty:
+                st.markdown("""
+                <div class="alert-card">
+                    <h4>⚠️ Attention Required</h4>
+                    <p>There are <strong>{}</strong> overdue deliveries with a maximum delay of <strong>{}</strong> days. 
+                    Please coordinate with the logistics team to resolve these urgently.</p>
+                </div>
+                """.format(
+                    overdue_df['delivery_id'].nunique(),
+                    overdue_df['days_overdue'].max()
+                ), unsafe_allow_html=True)
+            
+            # Quick Stats by Status and Timeline
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("📊 Delivery Status Distribution")
-                status_counts = df['shipment_status'].value_counts()
-                st.bar_chart(status_counts)
+                st.subheader("📊 Shipment Status Distribution")
+                # Use Vietnamese status names
+                status_counts = df['shipment_status_vn'].value_counts()
+                fig1 = go.Figure(data=[
+                    go.Bar(
+                        x=status_counts.index,
+                        y=status_counts.values,
+                        marker_color=['#2ecc71' if 'Đã giao' in x else 
+                                    '#3498db' if 'Đang giao' in x else
+                                    '#f39c12' if 'Đã xuất kho' in x else
+                                    '#e74c3c' for x in status_counts.index]
+                    )
+                ])
+                fig1.update_layout(
+                    xaxis_title="Status",
+                    yaxis_title="Count",
+                    showlegend=False,
+                    height=300
+                )
+                st.plotly_chart(fig1, use_container_width=True)
             
             with col2:
-                st.subheader("🌍 Deliveries by Country")
-                country_counts = df['recipient_country_name'].value_counts().head(10)
-                st.bar_chart(country_counts)
+                st.subheader("⏱️ Delivery Timeline Analysis")
+                timeline_counts = df['delivery_timeline_status'].value_counts()
+                fig2 = go.Figure(data=[
+                    go.Pie(
+                        labels=timeline_counts.index,
+                        values=timeline_counts.values,
+                        marker_colors=['#2ecc71' if x == 'Completed' else
+                                     '#3498db' if x == 'On Schedule' else
+                                     '#f39c12' if x == 'Due Today' else
+                                     '#e74c3c' if x == 'Overdue' else
+                                     '#95a5a6' for x in timeline_counts.index]
+                    )
+                ])
+                fig2.update_layout(height=300)
+                st.plotly_chart(fig2, use_container_width=True)
             
-            # Recent Deliveries Table
+            # Product Analysis Section (NEW)
+            st.markdown("---")
+            st.subheader("📦 Product Fulfillment Analysis")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            # Get unique products with issues
+            out_of_stock_products = df[df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
+            partial_fulfill_products = df[df['product_fulfillment_status'] == 'Can Fulfill Partial']['product_pn'].nunique()
+            avg_fulfill_rate = df.groupby('product_id')['product_fulfill_rate_percent'].first().mean()
+            
+            with col1:
+                st.metric("Products Out of Stock", f"{out_of_stock_products:,}")
+            
+            with col2:
+                st.metric("Products Partial Fulfillment", f"{partial_fulfill_products:,}")
+            
+            with col3:
+                st.metric("Avg Product Fulfillment Rate", f"{avg_fulfill_rate:.1f}%")
+            
+            # Recent Deliveries Table with enhanced information
             st.markdown("---")
             st.subheader("📋 Recent Delivery Requests")
             
-            recent_df = df.nlargest(10, 'delivery_id')[['dn_number', 'customer', 'recipient_company', 
-                                                         'etd', 'shipment_status', 'fulfillment_status']]
+            recent_df = df.nlargest(10, 'delivery_id')[[
+                'dn_number', 'customer', 'recipient_company', 
+                'etd', 'delivery_timeline_status', 'shipment_status_vn',
+                'product_fulfillment_status', 'days_overdue'
+            ]].copy()
+            
             recent_df['etd'] = recent_df['etd'].dt.strftime('%Y-%m-%d')
+            recent_df = recent_df.rename(columns={
+                'delivery_timeline_status': 'Timeline',
+                'shipment_status_vn': 'Status',
+                'product_fulfillment_status': 'Fulfillment'
+            })
             
             # Apply status colors
-            def highlight_status(val):
-                if val == 'DELIVERED':
-                    return 'background-color: #90EE90'
-                elif val in ['PENDING', 'PROCESSING']:
-                    return 'background-color: #FFE4B5'
-                elif val == 'OVERDUE':
-                    return 'background-color: #FFB6C1'
-                return ''
+            def highlight_timeline(row):
+                styles = [''] * len(row)
+                if row['Timeline'] == 'Overdue':
+                    styles[4] = 'background-color: #ffcccb'
+                elif row['Timeline'] == 'Due Today':
+                    styles[4] = 'background-color: #ffe4b5'
+                elif row['Timeline'] == 'On Schedule':
+                    styles[4] = 'background-color: #c8e6c9'
+                elif row['Timeline'] == 'Completed':
+                    styles[4] = 'background-color: #e0e0e0'
+                
+                if row['Fulfillment'] == 'Out of Stock':
+                    styles[6] = 'background-color: #ffcccb'
+                elif row['Fulfillment'] == 'Can Fulfill Partial':
+                    styles[6] = 'background-color: #ffe4b5'
+                
+                return styles
             
-            styled_df = recent_df.style.applymap(highlight_status, subset=['shipment_status'])
+            styled_df = recent_df.style.apply(highlight_timeline, axis=1)
             st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            
+            # Overdue Details (NEW)
+            if not overdue_df.empty:
+                with st.expander("🚨 Overdue Delivery Details", expanded=False):
+                    overdue_summary = data_loader.get_overdue_deliveries()
+                    if not overdue_summary.empty:
+                        st.dataframe(
+                            overdue_summary[['dn_number', 'customer', 'days_overdue', 
+                                           'remaining_quantity_to_deliver', 'product_fulfillment_status']]
+                            .style.format({'remaining_quantity_to_deliver': '{:,.0f}'}),
+                            use_container_width=True
+                        )
             
         else:
             st.warning("No delivery data available")
