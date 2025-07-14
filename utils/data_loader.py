@@ -496,3 +496,258 @@ class DeliveryDataLoader:
         except Exception as e:
             logger.error(f"Error getting product demand analysis: {e}")
             return pd.DataFrame()
+        
+    # Add these methods to utils/data_loader.py
+
+    def get_customs_clearance_summary(self):
+        """Get summary of customs clearance deliveries (EPE + Foreign)"""
+        try:
+            query = text("""
+            SELECT 
+                COUNT(DISTINCT CASE WHEN is_epe_company = 'Yes' THEN delivery_id END) as epe_deliveries,
+                COUNT(DISTINCT CASE WHEN customer_country_code != legal_entity_country_code THEN delivery_id END) as foreign_deliveries,
+                COUNT(DISTINCT CASE WHEN customer_country_code != legal_entity_country_code THEN customer_country_name END) as countries
+            FROM delivery_full_view
+            WHERE etd >= CURDATE()
+                AND etd <= DATE_ADD(CURDATE(), INTERVAL 4 WEEK)
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+                AND (is_epe_company = 'Yes' OR customer_country_code != legal_entity_country_code)
+            """)
+            
+            with self.engine.connect() as conn:
+                result = conn.execute(query).fetchone()
+                
+            return pd.DataFrame([{
+                'epe_deliveries': result[0] or 0,
+                'foreign_deliveries': result[1] or 0,
+                'countries': result[2] or 0
+            }])
+            
+        except Exception as e:
+            logger.error(f"Error getting customs clearance summary: {e}")
+            return pd.DataFrame()
+
+    def get_customs_clearance_schedule(self):
+        """Get customs clearance schedule for EPE and Foreign customers"""
+        try:
+            today = datetime.now().date()
+            end_date = today + timedelta(weeks=4)
+            
+            query = text("""
+            SELECT DISTINCT
+                DATE(etd) as delivery_date,
+                etd,
+                customer,
+                customer_code,
+                customer_street,
+                customer_state_province,
+                customer_country_code,
+                customer_country_name,
+                recipient_company,
+                recipient_company_code,
+                recipient_contact,
+                recipient_contact_email,
+                recipient_contact_phone,
+                recipient_address,
+                recipient_state_province,
+                recipient_country_code,
+                recipient_country_name,
+                delivery_id,
+                dn_number,
+                sto_dr_line_id,
+                oc_number,
+                oc_line_id,
+                product_pn,
+                product_id,
+                pt_code,
+                package_size,
+                standard_quantity,
+                selling_quantity,
+                uom_conversion,
+                remaining_quantity_to_deliver,
+                total_instock_at_preferred_warehouse,
+                total_instock_all_warehouses,
+                gap_quantity,
+                product_gap_quantity,
+                product_total_remaining_demand,
+                product_fulfill_rate_percent,
+                delivery_demand_percentage,
+                shipment_status,
+                shipment_status_vn,
+                fulfillment_status,
+                product_fulfillment_status,
+                delivery_timeline_status,
+                days_overdue,
+                preferred_warehouse,
+                is_epe_company,
+                legal_entity,
+                legal_entity_code,
+                legal_entity_state_province,
+                legal_entity_country_code,
+                legal_entity_country_name,
+                created_by_name,
+                created_date,
+                -- Calculate customs type
+                CASE 
+                    WHEN is_epe_company = 'Yes' THEN 'EPE'
+                    WHEN customer_country_code != legal_entity_country_code THEN 'Foreign'
+                    ELSE 'Domestic'
+                END as customs_type,
+                -- EPE location info
+                CASE 
+                    WHEN is_epe_company = 'Yes' THEN 
+                        CONCAT(recipient_state_province, ' - ', recipient_company)
+                    ELSE NULL
+                END as epe_location
+            FROM delivery_full_view
+            WHERE etd >= :today
+                AND etd <= :end_date
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+                AND (
+                    is_epe_company = 'Yes' 
+                    OR customer_country_code != legal_entity_country_code
+                )
+            ORDER BY 
+                customs_type,
+                CASE 
+                    WHEN is_epe_company = 'Yes' THEN recipient_state_province
+                    ELSE customer_country_name
+                END,
+                delivery_date,
+                customer,
+                delivery_id,
+                sto_dr_line_id
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params={
+                    'today': today,
+                    'end_date': end_date
+                })
+            
+            # Debug: Log columns
+            logger.info(f"Columns retrieved from customs query: {df.columns.tolist()}")
+            
+            # Debug: Check for duplicate columns
+            if not df.empty:
+                duplicate_cols = df.columns[df.columns.duplicated()].tolist()
+                if duplicate_cols:
+                    logger.warning(f"Duplicate columns found in customs clearance data: {duplicate_cols}")
+                    # Remove duplicates
+                    df = df.loc[:, ~df.columns.duplicated()]
+                
+                # Add total_quantity as alias for remaining_quantity_to_deliver
+                df['total_quantity'] = df['remaining_quantity_to_deliver']
+                
+                # Log summary
+                epe_count = df[df['customs_type'] == 'EPE']['delivery_id'].nunique()
+                foreign_count = df[df['customs_type'] == 'Foreign']['delivery_id'].nunique()
+                logger.info(f"Loaded {epe_count} EPE and {foreign_count} Foreign deliveries for customs clearance")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting customs clearance schedule: {e}")
+            return pd.DataFrame()
+
+    def get_customs_clearance_by_type(self, customs_type='EPE'):
+        """Get customs clearance data filtered by type (EPE or Foreign)"""
+        try:
+            df = self.get_customs_clearance_schedule()
+            
+            if df.empty:
+                return pd.DataFrame()
+            
+            # Filter by customs type
+            if customs_type == 'EPE':
+                filtered_df = df[df['customs_type'] == 'EPE'].copy()
+            elif customs_type == 'Foreign':
+                filtered_df = df[df['customs_type'] == 'Foreign'].copy()
+            else:
+                filtered_df = df.copy()
+            
+            return filtered_df
+            
+        except Exception as e:
+            logger.error(f"Error filtering customs clearance by type: {e}")
+            return pd.DataFrame()
+
+    def get_customs_country_summary(self):
+        """Get summary of foreign deliveries by country"""
+        try:
+            today = datetime.now().date()
+            end_date = today + timedelta(weeks=4)
+            
+            query = text("""
+            SELECT 
+                customer_country_name as country,
+                customer_country_code as country_code,
+                COUNT(DISTINCT delivery_id) as deliveries,
+                COUNT(DISTINCT customer) as customers,
+                SUM(remaining_quantity_to_deliver) as total_quantity,
+                COUNT(DISTINCT product_id) as products,
+                MIN(etd) as first_delivery,
+                MAX(etd) as last_delivery
+            FROM delivery_full_view
+            WHERE etd >= :today
+                AND etd <= :end_date
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+                AND customer_country_code != legal_entity_country_code
+            GROUP BY customer_country_name, customer_country_code
+            ORDER BY deliveries DESC, country
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params={
+                    'today': today,
+                    'end_date': end_date
+                })
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting customs country summary: {e}")
+            return pd.DataFrame()
+
+    def get_epe_location_summary(self):
+        """Get summary of EPE deliveries by location/industrial zone"""
+        try:
+            today = datetime.now().date()
+            end_date = today + timedelta(weeks=4)
+            
+            query = text("""
+            SELECT 
+                recipient_state_province as location,
+                COUNT(DISTINCT delivery_id) as deliveries,
+                COUNT(DISTINCT customer) as customers,
+                COUNT(DISTINCT recipient_company) as epe_companies,
+                SUM(remaining_quantity_to_deliver) as total_quantity,
+                COUNT(DISTINCT product_id) as products,
+                MIN(etd) as first_delivery,
+                MAX(etd) as last_delivery
+            FROM delivery_full_view
+            WHERE etd >= :today
+                AND etd <= :end_date
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+                AND is_epe_company = 'Yes'
+            GROUP BY recipient_state_province
+            ORDER BY deliveries DESC, location
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params={
+                    'today': today,
+                    'end_date': end_date
+                })
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting EPE location summary: {e}")
+            return pd.DataFrame()
+        
+            

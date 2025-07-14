@@ -1055,3 +1055,659 @@ class EmailSender:
             })
         
         return results
+    
+        # Add these methods to utils/email_sender.py
+
+    def create_customs_clearance_html(self, delivery_df):
+        """Create HTML content for customs clearance email"""
+        
+        # Ensure delivery_date is datetime
+        delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
+        
+        # Separate EPE and Foreign deliveries
+        epe_df = delivery_df[delivery_df['customs_type'] == 'EPE'].copy()
+        foreign_df = delivery_df[delivery_df['customs_type'] == 'Foreign'].copy()
+        
+        # Calculate summary statistics
+        total_epe_deliveries = epe_df['delivery_id'].nunique() if not epe_df.empty else 0
+        total_foreign_deliveries = foreign_df['delivery_id'].nunique() if not foreign_df.empty else 0
+        total_countries = foreign_df['customer_country_name'].nunique() if not foreign_df.empty else 0
+        total_epe_locations = epe_df['recipient_state_province'].nunique() if not epe_df.empty else 0
+        
+        total_quantity = delivery_df['remaining_quantity_to_deliver'].sum()
+        
+        # Start HTML
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                }}
+                .header {{
+                    background-color: #00796b;
+                    color: white;
+                    padding: 20px;
+                    text-align: center;
+                }}
+                .content {{
+                    padding: 20px;
+                }}
+                .summary-section {{
+                    background-color: #f5f5f5;
+                    border-radius: 5px;
+                    padding: 20px;
+                    margin: 20px 0;
+                }}
+                .summary-grid {{
+                    display: table;
+                    width: 100%;
+                    margin: 20px 0;
+                }}
+                .summary-item {{
+                    display: table-cell;
+                    text-align: center;
+                    padding: 10px;
+                    border-right: 1px solid #ddd;
+                }}
+                .summary-item:last-child {{
+                    border-right: none;
+                }}
+                .metric-value {{
+                    font-size: 28px;
+                    font-weight: bold;
+                    color: #00796b;
+                }}
+                .metric-label {{
+                    font-size: 14px;
+                    color: #666;
+                    margin-top: 5px;
+                }}
+                .section-header {{
+                    background-color: #e0f2f1;
+                    padding: 12px;
+                    margin: 25px 0 15px 0;
+                    border-left: 4px solid #00796b;
+                    font-weight: bold;
+                    font-size: 18px;
+                }}
+                .sub-section-header {{
+                    background-color: #f5f5f5;
+                    padding: 8px;
+                    margin: 15px 0 10px 0;
+                    border-left: 3px solid #4db6ac;
+                    font-weight: bold;
+                    font-size: 16px;
+                }}
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 10px;
+                }}
+                th, td {{
+                    padding: 8px;
+                    text-align: left;
+                    border-bottom: 1px solid #ddd;
+                }}
+                th {{
+                    background-color: #f8f9fa;
+                    font-weight: bold;
+                }}
+                .epe-row {{
+                    background-color: #e8f5e9;
+                }}
+                .foreign-row {{
+                    background-color: #e3f2fd;
+                }}
+                .location-tag {{
+                    background-color: #4db6ac;
+                    color: white;
+                    padding: 2px 8px;
+                    border-radius: 3px;
+                    font-size: 12px;
+                }}
+                .country-tag {{
+                    background-color: #2196f3;
+                    color: white;
+                    padding: 2px 8px;
+                    border-radius: 3px;
+                    font-size: 12px;
+                }}
+                .week-summary {{
+                    background-color: #f8f9fa;
+                    padding: 10px;
+                    margin: 10px 0;
+                    border-radius: 5px;
+                }}
+                .footer {{
+                    margin-top: 30px;
+                    padding: 20px;
+                    background-color: #f8f9fa;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                }}
+                .info-box {{
+                    background-color: #fff3cd;
+                    border: 1px solid #ffeeba;
+                    border-radius: 5px;
+                    padding: 15px;
+                    margin: 20px 0;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🛃 Custom Clearance Schedule</h1>
+                <p>EPE & Foreign Customer Deliveries - Next 4 Weeks</p>
+            </div>
+            
+            <div class="content">
+                <p>Dear Custom Clearance Team,</p>
+                <p>Please find below the customs clearance schedule for the next 4 weeks, 
+                including Export Processing Enterprise (EPE) deliveries and foreign customer shipments.</p>
+                
+                <div class="summary-section">
+                    <h3>📊 Summary Overview</h3>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <div class="metric-value">{total_epe_deliveries}</div>
+                            <div class="metric-label">EPE Deliveries<br>(Xuất khẩu tại chỗ)</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="metric-value">{total_foreign_deliveries}</div>
+                            <div class="metric-label">Foreign Deliveries<br>(Xuất khẩu thông thường)</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="metric-value">{total_countries}</div>
+                            <div class="metric-label">Destination Countries</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="metric-value">{total_quantity:,.0f}</div>
+                            <div class="metric-label">Total Quantity</div>
+                        </div>
+                    </div>
+                </div>
+        """
+        
+        # EPE Section (Xuất khẩu tại chỗ)
+        if not epe_df.empty:
+            html += """
+                <div class="section-header">📦 XUẤT KHẨU TẠI CHỖ (EPE Companies)</div>
+                <p>Deliveries to Export Processing Enterprises within Vietnam requiring local export procedures:</p>
+            """
+            
+            # Group EPE by location and week
+            epe_df['week_start'] = epe_df['delivery_date'] - pd.to_timedelta(epe_df['delivery_date'].dt.dayofweek, unit='D')
+            epe_df['week_number'] = epe_df['delivery_date'].dt.isocalendar().week
+            
+            # Group by location first
+            for location, loc_df in epe_df.groupby('recipient_state_province', sort=True):
+                location_deliveries = loc_df['delivery_id'].nunique()
+                location_quantity = loc_df['remaining_quantity_to_deliver'].sum()
+                
+                html += f"""
+                    <div class="sub-section-header">
+                        <span class="location-tag">{location}</span>
+                        <span style="float: right; font-size: 14px; font-weight: normal;">
+                            {location_deliveries} deliveries | {location_quantity:,.0f} units
+                        </span>
+                    </div>
+                """
+                
+                # Then group by week within location
+                for week_key, week_df in loc_df.groupby('week_start', sort=True):
+                    week_number = week_df['week_number'].iloc[0]
+                    week_end = week_key + timedelta(days=6)
+                    
+                    html += f"""
+                        <div class="week-summary">
+                            <strong>Week {week_number} ({week_key.strftime('%b %d')} - {week_end.strftime('%b %d')})</strong>
+                        </div>
+                        <table>
+                            <tr>
+                                <th width="90">Date</th>
+                                <th width="180">EPE Company</th>
+                                <th width="150">Customer</th>
+                                <th width="100">DN Number</th>
+                                <th width="80">PT Code</th>
+                                <th width="120">Product</th>
+                                <th width="80">Quantity</th>
+                            </tr>
+                    """
+                    
+                    # Group by delivery for display
+                    display_df = week_df.groupby(['delivery_date', 'recipient_company', 'customer', 
+                                                'dn_number', 'product_id', 'pt_code', 'product_pn']).agg({
+                        'remaining_quantity_to_deliver': 'sum'
+                    }).reset_index()
+                    
+                    for _, row in display_df.iterrows():
+                        html += f"""
+                            <tr class="epe-row">
+                                <td>{row['delivery_date'].strftime('%b %d')}</td>
+                                <td>{row['recipient_company']}</td>
+                                <td>{row['customer']}</td>
+                                <td>{row['dn_number']}</td>
+                                <td>{row['pt_code']}</td>
+                                <td>{row['product_pn']}</td>
+                                <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
+                            </tr>
+                        """
+                    
+                    html += "</table>"
+        
+        # Foreign Section (Xuất khẩu thông thường)
+        if not foreign_df.empty:
+            html += """
+                <div class="section-header">🌍 XUẤT KHẨU THÔNG THƯỜNG (Foreign Customers)</div>
+                <p>International shipments requiring standard export procedures:</p>
+            """
+            
+            # Group Foreign by country and week
+            foreign_df['week_start'] = foreign_df['delivery_date'] - pd.to_timedelta(foreign_df['delivery_date'].dt.dayofweek, unit='D')
+            foreign_df['week_number'] = foreign_df['delivery_date'].dt.isocalendar().week
+            
+            # Group by country first
+            for country, country_df in foreign_df.groupby('customer_country_name', sort=True):
+                country_deliveries = country_df['delivery_id'].nunique()
+                country_quantity = country_df['remaining_quantity_to_deliver'].sum()
+                
+                html += f"""
+                    <div class="sub-section-header">
+                        <span class="country-tag">{country}</span>
+                        <span style="float: right; font-size: 14px; font-weight: normal;">
+                            {country_deliveries} deliveries | {country_quantity:,.0f} units
+                        </span>
+                    </div>
+                """
+                
+                # Then group by week within country
+                for week_key, week_df in country_df.groupby('week_start', sort=True):
+                    week_number = week_df['week_number'].iloc[0]
+                    week_end = week_key + timedelta(days=6)
+                    
+                    html += f"""
+                        <div class="week-summary">
+                            <strong>Week {week_number} ({week_key.strftime('%b %d')} - {week_end.strftime('%b %d')})</strong>
+                        </div>
+                        <table>
+                            <tr>
+                                <th width="90">Date</th>
+                                <th width="200">Customer</th>
+                                <th width="180">Ship To</th>
+                                <th width="100">DN Number</th>
+                                <th width="80">PT Code</th>
+                                <th width="120">Product</th>
+                                <th width="80">Quantity</th>
+                            </tr>
+                    """
+                    
+                    # Group by delivery for display
+                    display_df = week_df.groupby(['delivery_date', 'customer', 'recipient_company',
+                                                'dn_number', 'product_id', 'pt_code', 'product_pn']).agg({
+                        'remaining_quantity_to_deliver': 'sum'
+                    }).reset_index()
+                    
+                    for _, row in display_df.iterrows():
+                        html += f"""
+                            <tr class="foreign-row">
+                                <td>{row['delivery_date'].strftime('%b %d')}</td>
+                                <td>{row['customer']}</td>
+                                <td>{row['recipient_company']}</td>
+                                <td>{row['dn_number']}</td>
+                                <td>{row['pt_code']}</td>
+                                <td>{row['product_pn']}</td>
+                                <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
+                            </tr>
+                        """
+                    
+                    html += "</table>"
+        
+        # Add customs information box
+        html += """
+            <div class="info-box">
+                <h4>📋 Customs Documentation Requirements:</h4>
+                <p><strong>For EPE (Xuất khẩu tại chỗ):</strong></p>
+                <ul>
+                    <li>Tờ khai xuất khẩu tại chỗ</li>
+                    <li>C/O Form D nội địa</li>
+                    <li>Hóa đơn VAT</li>
+                    <li>Phiếu xuất kho</li>
+                </ul>
+                <p><strong>For Foreign Export:</strong></p>
+                <ul>
+                    <li>Export Declaration (Tờ khai xuất khẩu)</li>
+                    <li>Certificate of Origin (based on destination country)</li>
+                    <li>Commercial Invoice</li>
+                    <li>Packing List</li>
+                    <li>Bill of Lading / Airway Bill</li>
+                </ul>
+            </div>
+            
+            <div class="footer">
+                <p>This is an automated customs clearance schedule from Outbound Logistics System</p>
+                <p>For questions, please contact: <a href="mailto:outbound@prostech.vn">outbound@prostech.vn</a></p>
+                <p>Phone: +84 33 476273</p>
+            </div>
+        </div>
+        </body>
+        </html>
+        """
+        
+        return html
+
+    def create_customs_excel_attachment(self, delivery_df):
+        """Create Excel file for customs clearance with separate sheets"""
+        output = io.BytesIO()
+        
+        # Create a copy for Excel export
+        excel_df = delivery_df.copy()
+        
+        # Debug: Log available columns
+        logger.info(f"Available columns in customs data: {excel_df.columns.tolist()}")
+        
+        # Format date columns
+        date_columns = ['delivery_date', 'created_date', 'delivered_date', 'dispatched_date', 'sto_etd_date', 'oc_date', 'etd']
+        for col in date_columns:
+            if col in excel_df.columns:
+                try:
+                    excel_df[col] = pd.to_datetime(excel_df[col]).dt.strftime('%Y-%m-%d')
+                except Exception as e:
+                    logger.warning(f"Could not format date column {col}: {e}")
+        
+        # Remove duplicate columns
+        excel_df = excel_df.loc[:, ~excel_df.columns.duplicated()]
+        
+        # Debug: Check etd column specifically
+        logger.info(f"ETD column exists: {'etd' in excel_df.columns}")
+        
+        # Separate EPE and Foreign
+        epe_df = excel_df[excel_df['customs_type'] == 'EPE'].copy()
+        foreign_df = excel_df[excel_df['customs_type'] == 'Foreign'].copy()
+        
+        logger.info(f"EPE records: {len(epe_df)}, Foreign records: {len(foreign_df)}")
+        
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            try:
+                # Summary sheet
+                summary_data = []
+                
+                # EPE summary by location
+                if not epe_df.empty:
+                    epe_summary = epe_df.groupby('recipient_state_province').agg({
+                        'delivery_id': 'nunique',
+                        'dn_number': 'nunique',
+                        'remaining_quantity_to_deliver': 'sum',
+                        'customer': 'nunique'
+                    }).reset_index()
+                    epe_summary['Type'] = 'EPE'
+                    epe_summary.columns = ['Location', 'Deliveries', 'DN Count', 'Total Quantity', 'Customers', 'Type']
+                    summary_data.append(epe_summary)
+                
+                # Foreign summary by country
+                if not foreign_df.empty:
+                    foreign_summary = foreign_df.groupby('customer_country_name').agg({
+                        'delivery_id': 'nunique',
+                        'dn_number': 'nunique',
+                        'remaining_quantity_to_deliver': 'sum',
+                        'customer': 'nunique'
+                    }).reset_index()
+                    foreign_summary['Type'] = 'Foreign'
+                    foreign_summary.columns = ['Country', 'Deliveries', 'DN Count', 'Total Quantity', 'Customers', 'Type']
+                    summary_data.append(foreign_summary)
+                
+                if summary_data:
+                    summary_df = pd.concat(summary_data, ignore_index=True)
+                    summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                
+                # EPE Details sheet
+                if not epe_df.empty:
+                    logger.info("Creating EPE Details sheet...")
+                    # Select important columns for EPE - check existence first
+                    epe_columns_desired = [
+                        'delivery_date', 'recipient_state_province', 'recipient_company',
+                        'customer', 'dn_number', 'oc_number', 'pt_code', 'product_pn',
+                        'remaining_quantity_to_deliver', 'etd', 'shipment_status_vn',
+                        'preferred_warehouse', 'created_by_name'
+                    ]
+                    # Filter to only existing columns
+                    epe_columns = [col for col in epe_columns_desired if col in epe_df.columns]
+                    logger.info(f"EPE columns to export: {epe_columns}")
+                    
+                    # Check if critical columns exist
+                    missing_cols = [col for col in epe_columns_desired if col not in epe_df.columns]
+                    if missing_cols:
+                        logger.warning(f"Missing EPE columns: {missing_cols}")
+                    
+                    if epe_columns:  # Only proceed if we have columns to export
+                        epe_export = epe_df[epe_columns].copy()
+                        
+                        # Sort by available columns
+                        sort_cols = ['recipient_state_province', 'delivery_date']
+                        sort_cols = [col for col in sort_cols if col in epe_export.columns]
+                        if sort_cols:
+                            epe_export = epe_export.sort_values(sort_cols)
+                        
+                        epe_export.to_excel(writer, sheet_name='EPE Deliveries', index=False)
+                        logger.info("EPE Details sheet created successfully")
+                    else:
+                        logger.warning("No columns available for EPE export")
+                
+                # Foreign Details sheet
+                if not foreign_df.empty:
+                    logger.info("Creating Foreign Details sheet...")
+                    # Select important columns for Foreign - check existence first
+                    foreign_columns_desired = [
+                        'delivery_date', 'customer_country_name', 'customer',
+                        'recipient_company', 'recipient_address', 'dn_number',
+                        'oc_number', 'pt_code', 'product_pn', 'remaining_quantity_to_deliver',
+                        'etd', 'shipment_status_vn', 'preferred_warehouse', 'created_by_name'
+                    ]
+                    # Filter to only existing columns
+                    foreign_columns = [col for col in foreign_columns_desired if col in foreign_df.columns]
+                    logger.info(f"Foreign columns to export: {foreign_columns}")
+                    
+                    # Check if critical columns exist
+                    missing_cols = [col for col in foreign_columns_desired if col not in foreign_df.columns]
+                    if missing_cols:
+                        logger.warning(f"Missing Foreign columns: {missing_cols}")
+                    
+                    if foreign_columns:  # Only proceed if we have columns to export
+                        foreign_export = foreign_df[foreign_columns].copy()
+                        
+                        # Sort by available columns
+                        sort_cols = ['customer_country_name', 'delivery_date']
+                        sort_cols = [col for col in sort_cols if col in foreign_export.columns]
+                        if sort_cols:
+                            foreign_export = foreign_export.sort_values(sort_cols)
+                        
+                        foreign_export.to_excel(writer, sheet_name='Foreign Deliveries', index=False)
+                        logger.info("Foreign Details sheet created successfully")
+                    else:
+                        logger.warning("No columns available for Foreign export")
+                
+                # Timeline sheet - Weekly breakdown
+                try:
+                    # Process all deliveries
+                    all_df = excel_df.copy()
+                    
+                    # Check if delivery_date exists and convert
+                    if 'delivery_date' in all_df.columns:
+                        all_df['delivery_date'] = pd.to_datetime(all_df['delivery_date'])
+                        all_df['week_start'] = all_df['delivery_date'] - pd.to_timedelta(all_df['delivery_date'].dt.dayofweek, unit='D')
+                        all_df['week_number'] = all_df['delivery_date'].dt.isocalendar().week
+                        
+                        # Group by week and type
+                        weekly_summary = all_df.groupby(['week_start', 'week_number', 'customs_type']).agg({
+                            'delivery_id': 'nunique',
+                            'remaining_quantity_to_deliver': 'sum'
+                        }).reset_index()
+                        
+                        weekly_summary.columns = ['Week Start', 'Week Number', 'Type', 'Deliveries', 'Quantity']
+                        weekly_summary['Week End'] = weekly_summary['Week Start'] + timedelta(days=6)
+                        
+                        # Format dates
+                        weekly_summary['Week Start'] = weekly_summary['Week Start'].dt.strftime('%Y-%m-%d')
+                        weekly_summary['Week End'] = weekly_summary['Week End'].dt.strftime('%Y-%m-%d')
+                        
+                        weekly_summary = weekly_summary[['Week Number', 'Week Start', 'Week End', 'Type', 'Deliveries', 'Quantity']]
+                        
+                        weekly_summary.to_excel(writer, sheet_name='Weekly Timeline', index=False)
+                    else:
+                        logger.warning("delivery_date column not found for timeline sheet")
+                except Exception as e:
+                    logger.warning(f"Could not create timeline sheet: {e}")
+                
+                # Get workbook for formatting
+                workbook = writer.book
+                
+                # Define formats
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'bg_color': '#00796b',
+                    'font_color': 'white',
+                    'border': 1,
+                    'text_wrap': True,
+                    'valign': 'vcenter'
+                })
+                
+                number_format = workbook.add_format({
+                    'num_format': '#,##0',
+                    'border': 1
+                })
+                
+                # Apply formatting to all sheets
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    worksheet.set_column(0, 20, 15)  # Default width
+                    worksheet.freeze_panes(1, 0)  # Freeze header row
+                    
+            except Exception as e:
+                logger.error(f"Error creating customs Excel attachment: {e}")
+                # Return basic Excel even if formatting fails
+                try:
+                    output.seek(0)
+                    return output
+                except:
+                    raise
+        
+        output.seek(0)
+        return output
+
+    def send_customs_clearance_email(self, recipient_email, delivery_df, cc_emails=None):
+        """Send customs clearance email to customs team"""
+        try:
+            # Check email configuration
+            if not self.sender_email or not self.sender_password:
+                logger.error("Email configuration missing. Please set EMAIL_SENDER and EMAIL_PASSWORD.")
+                return False, "Email configuration missing. Please check environment variables."
+            
+            # Remove duplicate columns
+            delivery_df = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
+            
+            # Create message
+            msg = MIMEMultipart('alternative')
+            
+            # Count deliveries
+            epe_count = delivery_df[delivery_df['customs_type'] == 'EPE']['delivery_id'].nunique()
+            foreign_count = delivery_df[delivery_df['customs_type'] == 'Foreign']['delivery_id'].nunique()
+            
+            msg['Subject'] = f"🛃 Custom Clearance Schedule - {epe_count} EPE & {foreign_count} Foreign Deliveries"
+            msg['From'] = self.sender_email
+            msg['To'] = recipient_email
+            
+            if cc_emails:
+                msg['Cc'] = ', '.join(cc_emails)
+            
+            # Create HTML content
+            html_content = self.create_customs_clearance_html(delivery_df)
+            html_part = MIMEText(html_content, 'html')
+            msg.attach(html_part)
+            
+            # Create Excel attachment with fallback
+            excel_attached = False
+            try:
+                excel_data = self.create_customs_excel_attachment(delivery_df)
+                excel_part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                excel_part.set_payload(excel_data.read())
+                encoders.encode_base64(excel_part)
+                
+                filename = f"customs_clearance_schedule_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                excel_part.add_header(
+                    'Content-Disposition',
+                    f'attachment; filename="{filename}"'
+                )
+                msg.attach(excel_part)
+                excel_attached = True
+                logger.info("Excel attachment created successfully")
+            except Exception as e:
+                logger.error(f"Error creating Excel attachment: {e}")
+                # Try simplified CSV as fallback
+                try:
+                    csv_data = delivery_df.to_csv(index=False).encode('utf-8')
+                    csv_part = MIMEBase('text', 'csv')
+                    csv_part.set_payload(csv_data)
+                    encoders.encode_base64(csv_part)
+                    csv_part.add_header(
+                        'Content-Disposition',
+                        f'attachment; filename="customs_clearance_schedule_{datetime.now().strftime("%Y%m%d")}.csv"'
+                    )
+                    msg.attach(csv_part)
+                    logger.info("CSV fallback attachment created")
+                except Exception as csv_error:
+                    logger.error(f"Error creating CSV fallback: {csv_error}")
+                    # Continue without attachment
+            
+            # Create ICS calendar attachment
+            try:
+                calendar_gen = CalendarEventGenerator()
+                ics_content = calendar_gen.create_customs_ics_content(delivery_df, self.sender_email)
+                
+                if ics_content:
+                    ics_part = MIMEBase('text', 'calendar')
+                    ics_part.set_payload(ics_content.encode('utf-8'))
+                    encoders.encode_base64(ics_part)
+                    ics_part.add_header(
+                        'Content-Disposition',
+                        f'attachment; filename="customs_clearance_{datetime.now().strftime("%Y%m%d")}.ics"'
+                    )
+                    msg.attach(ics_part)
+            except Exception as e:
+                logger.warning(f"Error creating calendar attachment: {e}")
+                # Continue without calendar attachment
+            
+            # Send email
+            logger.info(f"Attempting to send customs clearance email to {recipient_email}...")
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                
+                recipients = [recipient_email]
+                if cc_emails:
+                    recipients.extend(cc_emails)
+                
+                server.sendmail(self.sender_email, recipients, msg.as_string())
+            
+            # Add note about attachment if failed
+            attachment_note = ""
+            if not excel_attached:
+                attachment_note = " (Note: Excel attachment could not be created, please check logs)"
+            
+            logger.info(f"Customs clearance email sent successfully to {recipient_email}{attachment_note}")
+            return True, f"Email sent successfully{attachment_note}"
+            
+        except smtplib.SMTPAuthenticationError:
+            error_msg = "Email authentication failed. Please check your email credentials."
+            logger.error(error_msg)
+            return False, error_msg
+        except smtplib.SMTPException as e:
+            error_msg = f"SMTP error: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            logger.error(f"Error sending customs email: {e}", exc_info=True)
+            return False, str(e)

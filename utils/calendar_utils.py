@@ -507,3 +507,152 @@ END:VEVENT
         ics_content += "END:VCALENDAR"
         
         return ics_content
+    
+
+    # Add this method to utils/calendar_utils.py
+
+    @staticmethod
+    def create_customs_ics_content(delivery_df, organizer_email):
+        """Create ICS content for customs clearance schedule with EPE and Foreign grouping"""
+        
+        # ICS header
+        ics_content = """BEGIN:VCALENDAR
+    VERSION:2.0
+    PRODID:-//Outbound Logistics//Customs Clearance Schedule//EN
+    CALSCALE:GREGORIAN
+    METHOD:REQUEST
+    """
+        
+        # Ensure delivery_date is datetime
+        delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
+        
+        # Group deliveries by date and customs type
+        grouped = delivery_df.groupby(['delivery_date', 'customs_type'])
+        
+        # Create events for each date and type combination
+        for (delivery_date, customs_type), type_df in grouped:
+            # Generate unique ID
+            uid = str(uuid.uuid4())
+            
+            # Current timestamp
+            now = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+            
+            # Set event time: 8:00 AM - 12:00 PM for customs processing
+            # Convert to UTC (assuming Vietnam timezone GMT+7)
+            start_datetime = delivery_date.replace(hour=8, minute=0) - timedelta(hours=7)
+            end_datetime = delivery_date.replace(hour=12, minute=0) - timedelta(hours=7)
+            
+            # Format for ICS
+            dtstart = start_datetime.strftime('%Y%m%dT%H%M%SZ')
+            dtend = end_datetime.strftime('%Y%m%dT%H%M%SZ')
+            
+            # Create summary based on customs type
+            total_deliveries = type_df['delivery_id'].nunique()
+            total_quantity = type_df['remaining_quantity_to_deliver'].sum()
+            
+            if customs_type == 'EPE':
+                # EPE specific info
+                locations = type_df['recipient_state_province'].unique()
+                location_str = ", ".join(locations[:3])
+                if len(locations) > 3:
+                    location_str += f" +{len(locations)-3} more"
+                
+                summary = f"🛃 EPE Customs ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
+                description = f"XUẤT KHẨU TẠI CHỖ - {delivery_date.strftime('%B %d, %Y')}\\n\\n"
+                description += f"Total EPE Deliveries: {total_deliveries}\\n"
+                description += f"Total Quantity: {total_quantity:,.0f}\\n"
+                description += f"Locations: {location_str}\\n\\n"
+                
+                # List EPE companies
+                description += "EPE COMPANIES:\\n"
+                for (customer, recipient), cust_df in type_df.groupby(['customer', 'recipient_company']):
+                    location = cust_df.iloc[0]['recipient_state_province']
+                    qty = cust_df['remaining_quantity_to_deliver'].sum()
+                    products = cust_df['product_id'].nunique() if 'product_id' in cust_df.columns else cust_df['product_pn'].nunique()
+                    description += f"\\n• {recipient} ({location})\\n"
+                    description += f"  Customer: {customer}\\n"
+                    description += f"  Products: {products} | Quantity: {qty:,.0f}\\n"
+                    
+                    # Add product details
+                    if 'product_id' in cust_df.columns:
+                        prod_summary = cust_df.groupby(['product_id', 'pt_code', 'product_pn'])['remaining_quantity_to_deliver'].sum()
+                        for (prod_id, pt_code, prod_pn), prod_qty in prod_summary.items():
+                            description += f"  - {pt_code} {prod_pn}: {prod_qty:,.0f}\\n"
+                    else:
+                        prod_summary = cust_df.groupby(['pt_code', 'product_pn'])['remaining_quantity_to_deliver'].sum()
+                        for (pt_code, prod_pn), prod_qty in prod_summary.items():
+                            description += f"  - {pt_code} {prod_pn}: {prod_qty:,.0f}\\n"
+                
+                event_location = f"EPE Zones: {location_str}"
+                
+            else:  # Foreign
+                # Foreign specific info
+                countries = type_df['customer_country_name'].unique()
+                country_str = ", ".join(countries[:3])
+                if len(countries) > 3:
+                    country_str += f" +{len(countries)-3} more"
+                
+                summary = f"🛃 Export Customs ({total_deliveries}) - {delivery_date.strftime('%b %d')}"
+                description = f"XUẤT KHẨU THÔNG THƯỜNG - {delivery_date.strftime('%B %d, %Y')}\\n\\n"
+                description += f"Total Foreign Deliveries: {total_deliveries}\\n"
+                description += f"Total Quantity: {total_quantity:,.0f}\\n"
+                description += f"Countries: {country_str}\\n\\n"
+                
+                # List by country
+                description += "BY COUNTRY:\\n"
+                for country, country_df in type_df.groupby('customer_country_name'):
+                    country_deliveries = country_df['delivery_id'].nunique()
+                    country_qty = country_df['remaining_quantity_to_deliver'].sum()
+                    description += f"\\n• {country} ({country_deliveries} deliveries)\\n"
+                    
+                    # List customers in this country
+                    for customer, cust_df in country_df.groupby('customer')[:3]:  # Limit to first 3
+                        qty = cust_df['remaining_quantity_to_deliver'].sum()
+                        products = cust_df['product_id'].nunique() if 'product_id' in cust_df.columns else cust_df['product_pn'].nunique()
+                        description += f"  - {customer}: {products} products, {qty:,.0f} units\\n"
+                
+                event_location = f"Export to: {country_str}"
+            
+            # Add customs requirements reminder
+            description += "\\n📋 CUSTOMS CHECKLIST:\\n"
+            if customs_type == 'EPE':
+                description += "- Tờ khai xuất khẩu tại chỗ\\n"
+                description += "- C/O Form D nội địa\\n"
+                description += "- Hóa đơn VAT\\n"
+            else:
+                description += "- Export Declaration\\n"
+                description += "- Certificate of Origin\\n"
+                description += "- Commercial Invoice\\n"
+                description += "- Packing List\\n"
+            
+            # Add event to ICS
+            ics_content += f"""BEGIN:VEVENT
+    UID:{uid}@customs.outbound.prostech.vn
+    DTSTAMP:{now}
+    ORGANIZER;CN=Customs Clearance:mailto:{organizer_email}
+    DTSTART:{dtstart}
+    DTEND:{dtend}
+    SUMMARY:{summary}
+    DESCRIPTION:{description}
+    LOCATION:{event_location}
+    STATUS:CONFIRMED
+    SEQUENCE:0
+    TRANSP:BUSY
+    BEGIN:VALARM
+    TRIGGER:-P1D
+    ACTION:DISPLAY
+    DESCRIPTION:Customs clearance preparation reminder - Check documents!
+    END:VALARM
+    BEGIN:VALARM
+    TRIGGER:-PT2H
+    ACTION:DISPLAY
+    DESCRIPTION:Customs clearance in 2 hours - Final document check!
+    END:VALARM
+    END:VEVENT
+    """
+        
+        # ICS footer
+        ics_content += "END:VCALENDAR"
+        
+        return ics_content
+
