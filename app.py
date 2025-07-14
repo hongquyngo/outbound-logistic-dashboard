@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # App version - Updated
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.4.0"
 
 # Initialize auth manager
 auth_manager = AuthManager()
@@ -250,8 +250,8 @@ def show_main_dashboard():
             col1, col2, col3 = st.columns(3)
             
             # Get unique products with issues
-            out_of_stock_products = df[df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
-            partial_fulfill_products = df[df['product_fulfillment_status'] == 'Can Fulfill Partial']['product_pn'].nunique()
+            out_of_stock_products = df[df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
+            partial_fulfill_products = df[df['product_fulfillment_status'] == 'Can Fulfill Partial']['product_id'].nunique()
             avg_fulfill_rate = df.groupby('product_id')['product_fulfill_rate_percent'].first().mean()
             
             with col1:
@@ -270,32 +270,36 @@ def show_main_dashboard():
             recent_df = df.nlargest(10, 'delivery_id')[[
                 'dn_number', 'customer', 'recipient_company', 
                 'etd', 'delivery_timeline_status', 'shipment_status_vn',
-                'product_fulfillment_status', 'days_overdue'
+                'pt_code', 'product_pn', 'product_fulfillment_status', 'days_overdue'
             ]].copy()
             
             recent_df['etd'] = recent_df['etd'].dt.strftime('%Y-%m-%d')
             recent_df = recent_df.rename(columns={
                 'delivery_timeline_status': 'Timeline',
                 'shipment_status_vn': 'Status',
-                'product_fulfillment_status': 'Fulfillment'
+                'product_fulfillment_status': 'Fulfillment',
+                'pt_code': 'PT Code',
+                'product_pn': 'Product'
             })
             
             # Apply status colors
             def highlight_timeline(row):
                 styles = [''] * len(row)
+                timeline_col = list(row.index).index('Timeline')
                 if row['Timeline'] == 'Overdue':
-                    styles[4] = 'background-color: #ffcccb'
+                    styles[timeline_col] = 'background-color: #ffcccb'
                 elif row['Timeline'] == 'Due Today':
-                    styles[4] = 'background-color: #ffe4b5'
+                    styles[timeline_col] = 'background-color: #ffe4b5'
                 elif row['Timeline'] == 'On Schedule':
-                    styles[4] = 'background-color: #c8e6c9'
+                    styles[timeline_col] = 'background-color: #c8e6c9'
                 elif row['Timeline'] == 'Completed':
-                    styles[4] = 'background-color: #e0e0e0'
+                    styles[timeline_col] = 'background-color: #e0e0e0'
                 
+                fulfillment_col = list(row.index).index('Fulfillment')
                 if row['Fulfillment'] == 'Out of Stock':
-                    styles[6] = 'background-color: #ffcccb'
+                    styles[fulfillment_col] = 'background-color: #ffcccb'
                 elif row['Fulfillment'] == 'Can Fulfill Partial':
-                    styles[6] = 'background-color: #ffe4b5'
+                    styles[fulfillment_col] = 'background-color: #ffe4b5'
                 
                 return styles
             

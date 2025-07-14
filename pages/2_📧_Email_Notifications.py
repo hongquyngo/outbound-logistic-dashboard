@@ -278,31 +278,153 @@ if selected_sales and st.button("👁️ Preview Email Content", type="secondary
                     max_days_overdue = preview_df['days_overdue'].max() if 'days_overdue' in preview_df.columns else 0
                     st.metric("Max Days Overdue", int(max_days_overdue) if pd.notna(max_days_overdue) else 0)
                 with col4:
-                    out_of_stock = preview_df[preview_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
+                    out_of_stock = preview_df[preview_df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
                     st.metric("Out of Stock Products", out_of_stock)
             
             # Show sample data
             if notification_type == "📅 Delivery Schedule":
-                display_df = preview_df.groupby(['delivery_date', 'customer', 'recipient_company', 'product_pn']).agg({
-                    'remaining_quantity_to_deliver': 'sum',
-                    'fulfillment_status': lambda x: 'Mixed' if x.nunique() > 1 else x.iloc[0]
-                }).reset_index()
+                # Group by product_id instead of product_pn
+                agg_dict = {'remaining_quantity_to_deliver': 'sum'}
+                
+                # Add product_fulfillment_status if it exists
+                if 'product_fulfillment_status' in preview_df.columns:
+                    agg_dict['product_fulfillment_status'] = 'first'
+                elif 'fulfillment_status' in preview_df.columns:
+                    agg_dict['fulfillment_status'] = 'first'
+                
+                display_df = preview_df.groupby(['delivery_date', 'customer', 'recipient_company', 'product_id', 'pt_code', 'product_pn']).agg(agg_dict).reset_index()
+                
+                # Format date column
+                display_df['delivery_date'] = pd.to_datetime(display_df['delivery_date']).dt.strftime('%Y-%m-%d')
+                
+                # Prepare fulfillment column
+                if 'product_fulfillment_status' in display_df.columns:
+                    fulfillment_col = 'product_fulfillment_status'
+                elif 'fulfillment_status' in display_df.columns:
+                    fulfillment_col = 'fulfillment_status'
+                else:
+                    display_df['fulfillment_status'] = 'Unknown'
+                    fulfillment_col = 'fulfillment_status'
+                
+                # Select columns to display
+                display_cols = ['delivery_date', 'customer', 'recipient_company', 'pt_code', 'product_pn', 
+                               'remaining_quantity_to_deliver', fulfillment_col]
+                
+                # Rename columns for display
+                display_df = display_df[display_cols].rename(columns={
+                    'delivery_date': 'Delivery Date',
+                    'customer': 'Customer', 
+                    'recipient_company': 'Ship To',
+                    'pt_code': 'PT Code',
+                    'product_pn': 'Product',
+                    'remaining_quantity_to_deliver': 'Quantity',
+                    fulfillment_col: 'Fulfillment Status'
+                })
+                
+                # Drop product_id from display and arrange column order
+                display_cols_ordered = ['Delivery Date', 'Customer', 'Ship To', 'PT Code', 'Product', 'Quantity', 'Fulfillment Status']
+                display_df = display_df[display_cols_ordered]
+                def style_fulfillment(val):
+                    if val == 'Out of Stock':
+                        return 'background-color: #ffcccb'
+                    elif val == 'Can Fulfill Partial':
+                        return 'background-color: #ffe4b5'
+                    elif val == 'Fulfilled' or val == 'Can Fulfill All':
+                        return 'background-color: #c8e6c9'
+                    return ''
+                
+                styled_df = display_df.head(10).style.applymap(
+                    style_fulfillment,
+                    subset=['Fulfillment Status']
+                ).format({
+                    'Quantity': '{:,.0f}'
+                })
                 
                 st.dataframe(
-                    display_df[['delivery_date', 'customer', 'recipient_company', 'product_pn', 
-                              'remaining_quantity_to_deliver', 'fulfillment_status']].head(10),
-                    use_container_width=True
+                    styled_df,
+                    use_container_width=True,
+                    hide_index=True
                 )
+                
+                if len(display_df) > 10:
+                    st.caption(f"Showing first 10 of {len(display_df)} rows")
+                
+                if len(display_df) > 10:
+                    st.caption(f"Showing first 10 of {len(display_df)} rows")
             else:
                 # For overdue alerts, show with timeline status
                 display_cols = ['delivery_date', 'delivery_timeline_status', 'days_overdue', 
-                               'customer', 'recipient_company', 'product_pn', 
+                               'customer', 'recipient_company', 'pt_code', 'product_pn', 
                                'remaining_quantity_to_deliver', 'product_fulfillment_status']
                 display_cols = [col for col in display_cols if col in preview_df.columns]
                 
+                # Group by product_id for consistent display
+                display_df = preview_df.groupby(['delivery_date', 'delivery_timeline_status', 'customer', 
+                                               'recipient_company', 'product_id', 'pt_code', 'product_pn']).agg({
+                    'remaining_quantity_to_deliver': 'sum',
+                    'days_overdue': 'first',
+                    'product_fulfillment_status': 'first'
+                }).reset_index()
+                
+                # Format date column
+                display_df['delivery_date'] = pd.to_datetime(display_df['delivery_date']).dt.strftime('%Y-%m-%d')
+                
+                # Select and rename columns
+                display_df = display_df.rename(columns={
+                    'delivery_date': 'Delivery Date',
+                    'customer': 'Customer',
+                    'recipient_company': 'Ship To',
+                    'delivery_timeline_status': 'Status',
+                    'days_overdue': 'Days Overdue',
+                    'pt_code': 'PT Code', 
+                    'product_pn': 'Product',
+                    'remaining_quantity_to_deliver': 'Quantity',
+                    'product_fulfillment_status': 'Fulfillment'
+                })
+                
+                # Drop product_id from display and arrange column order
+                if 'product_id' in display_df.columns:
+                    display_df = display_df.drop('product_id', axis=1)
+                
+                # Define column order based on notification type
+                if 'Status' in display_df.columns:
+                    display_cols_ordered = ['Delivery Date', 'Status', 'Days Overdue', 'Customer', 'Ship To', 'PT Code', 'Product', 'Quantity', 'Fulfillment']
+                else:
+                    display_cols_ordered = ['Delivery Date', 'Customer', 'Ship To', 'PT Code', 'Product', 'Quantity', 'Fulfillment']
+                
+                # Select only available columns in order
+                display_df = display_df[[col for col in display_cols_ordered if col in display_df.columns]]
+                
+                # Apply styling
+                def style_timeline_status(val):
+                    if val == 'Overdue':
+                        return 'background-color: #ffcccb'
+                    elif val == 'Due Today':
+                        return 'background-color: #ffe4b5'
+                    return ''
+                
+                def style_fulfillment(val):
+                    if val == 'Out of Stock':
+                        return 'color: #d32f2f; font-weight: bold'
+                    elif val == 'Can Fulfill Partial':
+                        return 'color: #f57c00; font-weight: bold'
+                    return ''
+                
+                styled_df = display_df.head(10).style.applymap(
+                    style_timeline_status,
+                    subset=['Status'] if 'Status' in display_df.columns else []
+                ).applymap(
+                    style_fulfillment,
+                    subset=['Fulfillment'] if 'Fulfillment' in display_df.columns else []
+                ).format({
+                    'Quantity': '{:,.0f}',
+                    'Days Overdue': '{:.0f}'
+                })
+                
                 st.dataframe(
-                    preview_df[display_cols].head(10),
-                    use_container_width=True
+                    styled_df,
+                    use_container_width=True,
+                    hide_index=True
                 )
         else:
             st.info("No deliveries found for preview")

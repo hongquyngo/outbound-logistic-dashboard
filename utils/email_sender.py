@@ -46,8 +46,8 @@ class EmailSender:
         
         # Out of stock products
         out_of_stock_products = 0
-        if 'product_fulfillment_status' in delivery_df.columns:
-            out_of_stock_products = delivery_df[delivery_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
+        if 'product_fulfillment_status' in delivery_df.columns and 'product_id' in delivery_df.columns:
+            out_of_stock_products = delivery_df[delivery_df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
         
         # Start HTML
         html = f"""
@@ -195,6 +195,7 @@ class EmailSender:
                         <th width="100">Delivery Date</th>
                         <th width="150">Customer</th>
                         <th width="150">Ship To</th>
+                        <th width="80">PT Code</th>
                         <th width="120">Product</th>
                         <th width="80">Quantity</th>
                         <th width="100">Fulfillment</th>
@@ -216,6 +217,7 @@ class EmailSender:
                         <td>{row['delivery_date'].strftime('%Y-%m-%d')}</td>
                         <td>{row['customer']}</td>
                         <td>{row['recipient_company']}</td>
+                        <td>{row['pt_code']}</td>
                         <td>{row['product_pn']}</td>
                         <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
                         <td class="{fulfillment_class}">{fulfillment_status}</td>
@@ -235,6 +237,7 @@ class EmailSender:
                         <th width="100">Delivery Date</th>
                         <th width="150">Customer</th>
                         <th width="150">Ship To</th>
+                        <th width="80">PT Code</th>
                         <th width="120">Product</th>
                         <th width="80">Quantity</th>
                         <th width="100">Fulfillment</th>
@@ -254,6 +257,7 @@ class EmailSender:
                         <td>{row['delivery_date'].strftime('%Y-%m-%d')}</td>
                         <td>{row['customer']}</td>
                         <td>{row['recipient_company']}</td>
+                        <td>{row['pt_code']}</td>
                         <td>{row['product_pn']}</td>
                         <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
                         <td class="{fulfillment_class}">{fulfillment_status}</td>
@@ -310,17 +314,13 @@ class EmailSender:
         logger.debug(f"Columns in delivery_df: {delivery_df.columns.tolist()}")
         
         # Calculate summary statistics with new fields
-        total_overdue = 0
         out_of_stock_products = 0
         avg_fulfill_rate = 100.0
         
-        if 'delivery_timeline_status' in delivery_df.columns:
-            total_overdue = delivery_df[delivery_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
+        if 'product_fulfillment_status' in delivery_df.columns and 'product_id' in delivery_df.columns:
+            out_of_stock_products = delivery_df[delivery_df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
         
-        if 'product_fulfillment_status' in delivery_df.columns:
-            out_of_stock_products = delivery_df[delivery_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
-        
-        if 'product_fulfill_rate_percent' in delivery_df.columns:
+        if 'product_fulfill_rate_percent' in delivery_df.columns and 'product_id' in delivery_df.columns:
             avg_fulfill_rate = delivery_df.groupby('product_id')['product_fulfill_rate_percent'].first().mean()
         
         # Start HTML
@@ -431,7 +431,7 @@ class EmailSender:
                             <div class="metric-label">Total Deliveries</div>
                         </div>
                         <div class="metric-box">
-                            <div class="metric-value">{delivery_df['product_pn'].nunique()}</div>
+                            <div class="metric-value">{delivery_df['product_id'].nunique() if 'product_id' in delivery_df.columns else delivery_df['product_pn'].nunique()}</div>
                             <div class="metric-label">Product Types</div>
                         </div>
                         <div class="metric-box">
@@ -446,17 +446,12 @@ class EmailSender:
                 </div>
         """
         
-        # Add alerts if any
-        if total_overdue > 0 or out_of_stock_products > 0:
-            html += """
+        # Add alerts if any out of stock products
+        if out_of_stock_products > 0:
+            html += f"""
                 <div class="warning">
                     <strong>⚠️ Attention Required:</strong><br>
-            """
-            if total_overdue > 0:
-                html += f"• {total_overdue} deliveries are overdue<br>"
-            if out_of_stock_products > 0:
-                html += f"• {out_of_stock_products} products are out of stock<br>"
-            html += """
+                    • {out_of_stock_products} products are out of stock<br>
                     Please coordinate with the logistics team to resolve these issues.
                 </div>
             """
@@ -469,14 +464,9 @@ class EmailSender:
             
             # Calculate totals for this week
             week_unique_deliveries = week_df.groupby(['delivery_date', 'customer', 'recipient_company']).ngroups
-            week_unique_products = week_df.groupby(['delivery_date', 'customer', 'recipient_company', 'product_pn']).ngroups
+            week_unique_products = week_df['product_id'].nunique()
             week_line_items = len(week_df)
             week_total_qty = week_df['remaining_quantity_to_deliver'].sum()
-            
-            # Safe check for overdue
-            week_overdue = 0
-            if 'delivery_timeline_status' in week_df.columns:
-                week_overdue = week_df[week_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
             
             html += f"""
                 <div class="week-section">
@@ -488,30 +478,30 @@ class EmailSender:
                     </div>
             """
             
-            if week_overdue > 0:
-                html += f"""
-                    <div style="background-color: #ffebee; padding: 8px; margin-bottom: 10px; border-radius: 3px;">
-                        ⚠️ <strong>{week_overdue} overdue deliveries</strong> in this week
-                    </div>
-                """
-            
             html += """
                     <table>
                         <tr>
                             <th style="width: 80px;">Date</th>
-                            <th style="width: 80px;">Status</th>
                             <th style="width: 180px;">Customer</th>
                             <th style="width: 180px;">Ship To</th>
+                            <th style="width: 100px;">PT Code</th>
                             <th style="width: 140px;">Product</th>
                             <th style="width: 80px;">Qty</th>
                             <th style="width: 100px;">Fulfillment</th>
                         </tr>
             """
             
-            # Group by date, customer, recipient, and PRODUCT for display
+            # Group by date, customer, recipient, and PRODUCT ID (not product_pn) for display
             # Keep groupby columns separate from aggregation columns
-            group_cols = ['delivery_date', 'customer', 'recipient_company', 
-                         'recipient_state_province', 'recipient_country_name', 'product_pn']
+            if 'product_id' in week_df.columns:
+                group_cols = ['delivery_date', 'customer', 'recipient_company', 
+                             'recipient_state_province', 'recipient_country_name', 
+                             'product_id', 'pt_code', 'product_pn']
+            else:
+                # Fallback if product_id not available
+                group_cols = ['delivery_date', 'customer', 'recipient_company', 
+                             'recipient_state_province', 'recipient_country_name', 
+                             'pt_code', 'product_pn']
             
             # Create a copy for aggregation to avoid modifying original
             agg_df = week_df.copy()
@@ -527,52 +517,37 @@ class EmailSender:
             
             if 'product_fulfillment_status' in agg_df.columns:
                 agg_dict['product_fulfillment_status'] = 'first'
-                
-            if 'delivery_timeline_status' in agg_df.columns:
-                agg_dict['delivery_timeline_status'] = 'first'
-                
-            if 'days_overdue' in agg_df.columns:
-                agg_dict['days_overdue'] = 'first'
             
             try:
                 display_group = agg_df.groupby(group_cols, as_index=False).agg(agg_dict)
-                # Sort by date and product
-                display_group = display_group.sort_values(['delivery_date', 'product_pn'])
+                # Sort by date and product - use pt_code if product_id not available
+                if 'product_id' in display_group.columns:
+                    display_group = display_group.sort_values(['delivery_date', 'product_id'])
+                else:
+                    display_group = display_group.sort_values(['delivery_date', 'pt_code'])
             except Exception as e:
                 logger.error(f"Error in groupby: {e}")
                 # Fallback: simple grouping without status columns
                 display_group = agg_df.groupby(group_cols, as_index=False).agg({
                     'remaining_quantity_to_deliver': 'sum'
                 })
-                display_group = display_group.sort_values(['delivery_date', 'product_pn'])
+                if 'product_id' in display_group.columns:
+                    display_group = display_group.sort_values(['delivery_date', 'product_id'])
+                else:
+                    display_group = display_group.sort_values(['delivery_date', 'pt_code'])
             
             # Add rows to table
             for _, row in display_group.iterrows():
-                # Determine row class based on status
-                row_class = ''
-                timeline_status = row.get('delivery_timeline_status', 'On Schedule')
-                if timeline_status == 'Overdue':
-                    row_class = 'overdue'
-                
                 # Product fulfillment status
                 product_status = row.get('product_fulfillment_status', row.get('fulfillment_status', 'Unknown'))
                 status_class = 'urgent' if product_status in ['Out of Stock', 'Can Fulfill Partial'] else ''
                 
-                # Timeline indicator
-                timeline_indicator = ''
-                if timeline_status == 'Overdue':
-                    timeline_indicator = '🔴'
-                elif timeline_status == 'Due Today':
-                    timeline_indicator = '🟡'
-                else:
-                    timeline_indicator = '🟢'
-                
                 html += f"""
-                        <tr class="{row_class}">
+                        <tr>
                             <td>{row['delivery_date'].strftime('%b %d')}</td>
-                            <td>{timeline_indicator}</td>
                             <td>{row['customer']}</td>
                             <td>{row['recipient_company']}</td>
+                            <td>{row['pt_code']}</td>
                             <td>{row['product_pn']}</td>
                             <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
                             <td class="{status_class}">{product_status}</td>
@@ -587,10 +562,8 @@ class EmailSender:
         # Add legend
         html += """
             <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 5px;">
-                <h4>Legend:</h4>
-                <p>🟢 On Schedule | 🟡 Due Today | 🔴 Overdue</p>
-                <p><strong>Fulfillment Status:</strong><br>
-                   • <strong>Can Fulfill All:</strong> Sufficient inventory for all deliveries<br>
+                <h4>Fulfillment Status:</h4>
+                <p>• <strong>Can Fulfill All:</strong> Sufficient inventory for all deliveries<br>
                    • <strong>Can Fulfill Partial:</strong> Limited inventory available<br>
                    • <strong>Out of Stock:</strong> No inventory available</p>
             </div>
@@ -912,8 +885,12 @@ class EmailSender:
         # Remove duplicate columns first
         delivery_df_clean = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
         
+        # Check if product_id exists
+        if 'product_id' not in delivery_df_clean.columns:
+            return pd.DataFrame()  # Return empty if no product_id
+        
         # Group by product for analysis
-        product_analysis = delivery_df_clean.groupby(['product_pn', 'product_id']).agg({
+        product_analysis = delivery_df_clean.groupby(['product_id', 'pt_code', 'product_pn']).agg({
             'delivery_id': 'nunique',
             'remaining_quantity_to_deliver': 'sum',
             'product_total_remaining_demand': 'first',
@@ -925,8 +902,9 @@ class EmailSender:
         
         # Rename columns
         product_analysis.columns = [
-            'Product',
             'Product ID',
+            'PT Code',
+            'Product',
             'Active Deliveries',
             'This Sales Demand',
             'Total Product Demand',

@@ -181,11 +181,11 @@ if df is not None and not df.empty:
             st.metric("Avg Product Fulfillment Rate", f"{avg_fulfill_rate:.1f}%")
         
         with col2:
-            unique_products = df['product_pn'].nunique()
+            unique_products = df['product_id'].nunique()
             st.metric("Unique Products", f"{unique_products:,}")
         
         with col3:
-            out_of_stock = df[df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
+            out_of_stock = df[df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
             st.metric("Products Out of Stock", f"{out_of_stock:,}")
         
         with col4:
@@ -259,7 +259,7 @@ if df is not None and not df.empty:
             
             with col2:
                 # Product fulfillment status distribution
-                fulfillment_df = df.groupby('product_fulfillment_status')['product_pn'].nunique().reset_index()
+                fulfillment_df = df.groupby('product_fulfillment_status')['product_id'].nunique().reset_index()
                 fulfillment_df.columns = ['Status', 'Product Count']
                 
                 fig2 = px.pie(
@@ -296,7 +296,7 @@ if df is not None and not df.empty:
             
             # Select columns to display - Updated with new fields
             default_columns = ['dn_number', 'customer', 'recipient_company', 'etd', 
-                             'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
+                             'pt_code', 'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
                              'product_fulfill_rate_percent', 'delivery_timeline_status',
                              'days_overdue', 'shipment_status_vn', 'product_fulfillment_status', 
                              'is_epe_company']
@@ -379,19 +379,20 @@ if df is not None and not df.empty:
                 if not gap_products.empty:
                     fig4 = px.bar(
                         gap_products,
-                        x='product_pn',
+                        x='pt_code',
                         y='gap_quantity',
                         title='Top 10 Products with Supply Gap',
-                        labels={'gap_quantity': 'Gap Quantity', 'product_pn': 'Product'},
+                        labels={'gap_quantity': 'Gap Quantity', 'pt_code': 'PT Code'},
                         color='fulfill_rate',
-                        color_continuous_scale='RdYlGn'
+                        color_continuous_scale='RdYlGn',
+                        hover_data=['product_pn']
                     )
                     st.plotly_chart(fig4, use_container_width=True)
                 
                 # Product demand details
                 st.markdown("#### Product Demand Details")
                 st.dataframe(
-                    product_analysis[['product_pn', 'active_deliveries', 'total_remaining_demand',
+                    product_analysis[['pt_code', 'product_pn', 'active_deliveries', 'total_remaining_demand',
                                     'total_inventory', 'gap_quantity', 'fulfill_rate', 
                                     'fulfillment_status']].style.format({
                         'total_remaining_demand': '{:,.0f}',

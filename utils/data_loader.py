@@ -466,8 +466,9 @@ class DeliveryDataLoader:
         try:
             query = """
             SELECT 
-                product_pn,
                 product_id,
+                product_pn,
+                pt_code,
                 COUNT(DISTINCT delivery_id) as active_deliveries,
                 SUM(remaining_quantity_to_deliver) as total_remaining_demand,
                 MAX(total_instock_all_warehouses) as total_inventory,
@@ -485,7 +486,7 @@ class DeliveryDataLoader:
                 query += " AND product_id = :product_id"
                 params['product_id'] = product_id
             
-            query += " GROUP BY product_pn, product_id ORDER BY total_remaining_demand DESC"
+            query += " GROUP BY product_id, product_pn, pt_code ORDER BY total_remaining_demand DESC"
             
             with self.engine.connect() as conn:
                 df = pd.read_sql(text(query), conn, params=params)

@@ -43,21 +43,28 @@ METHOD:REQUEST
             dtend = end_datetime.strftime('%Y%m%dT%H%M%SZ')
             
             # Create summary and description for this date with enhanced info
-            # Aggregate quantities by product for accurate totals
-            products_agg = date_df.groupby('product_pn').agg({
-                'remaining_quantity_to_deliver': 'sum'
-            }).reset_index()
+            # Aggregate quantities by product ID for accurate totals
+            if 'product_id' in date_df.columns:
+                products_agg = date_df.groupby(['product_id', 'pt_code', 'product_pn']).agg({
+                    'remaining_quantity_to_deliver': 'sum'
+                }).reset_index()
+            else:
+                products_agg = date_df.groupby(['pt_code', 'product_pn']).agg({
+                    'remaining_quantity_to_deliver': 'sum'
+                }).reset_index()
             
             total_deliveries = len(date_df.groupby(['customer', 'recipient_company'])) if isinstance(date_df, pd.DataFrame) else 1
             total_line_items = len(date_df)
             total_quantity = date_df['remaining_quantity_to_deliver'].sum()
             
-            # Check for overdue or critical items
+            # Check for critical items
             overdue_count = 0
             out_of_stock_count = 0
             if 'delivery_timeline_status' in date_df.columns:
                 overdue_count = date_df[date_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
-            if 'product_fulfillment_status' in date_df.columns:
+            if 'product_fulfillment_status' in date_df.columns and 'product_id' in date_df.columns:
+                out_of_stock_count = date_df[date_df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
+            elif 'product_fulfillment_status' in date_df.columns:
                 out_of_stock_count = date_df[date_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
             
             # Add status indicator to summary
@@ -92,21 +99,30 @@ METHOD:REQUEST
                         days_overdue = cust_df['days_overdue'].iloc[0]
                         description += f"  ⚠️ OVERDUE by {days_overdue} days\\n"
                 
-                # Aggregate products and quantities
-                prod_summary = cust_df.groupby('product_pn').agg({
-                    'remaining_quantity_to_deliver': 'sum',
-                    'product_fulfillment_status': lambda x: x.iloc[0] if 'product_fulfillment_status' in cust_df.columns else 'Unknown'
-                })
-                
-                for prod, data in prod_summary.iterrows():
-                    qty = data['remaining_quantity_to_deliver']
-                    status_icon = ""
-                    if 'product_fulfillment_status' in data:
-                        if data['product_fulfillment_status'] == 'Out of Stock':
-                            status_icon = " ❌"
-                        elif data['product_fulfillment_status'] == 'Can Fulfill Partial':
-                            status_icon = " ⚠️"
-                    description += f"  - {prod}: {qty:,.0f} units{status_icon}\\n"
+                # Aggregate products and quantities by product_id
+                if 'product_id' in cust_df.columns:
+                    prod_summary = cust_df.groupby(['product_id', 'pt_code', 'product_pn']).agg({
+                        'remaining_quantity_to_deliver': 'sum'
+                    })
+                    
+                    for (prod_id, pt_code, prod_pn), qty in prod_summary.items():
+                        status_icon = ""
+                        # Check fulfillment status if available
+                        if 'product_fulfillment_status' in cust_df.columns:
+                            prod_status = cust_df[cust_df['product_id'] == prod_id]['product_fulfillment_status'].iloc[0]
+                            if prod_status == 'Out of Stock':
+                                status_icon = " ❌"
+                            elif prod_status == 'Can Fulfill Partial':
+                                status_icon = " ⚠️"
+                        description += f"  - {pt_code} {prod_pn}: {qty:,.0f} units{status_icon}\\n"
+                else:
+                    # Fallback if product_id not available
+                    prod_summary = cust_df.groupby(['pt_code', 'product_pn']).agg({
+                        'remaining_quantity_to_deliver': 'sum'
+                    })
+                    
+                    for (pt_code, prod_pn), qty in prod_summary.items():
+                        description += f"  - {pt_code} {prod_pn}: {qty:,.0f} units\\n"
                 
                 # Add fulfillment status
                 if 'fulfillment_status' in cust_df.columns:
@@ -170,10 +186,15 @@ END:VEVENT
             dates = f"{start_dt.strftime('%Y%m%dT%H%M%S')}/{end_dt.strftime('%Y%m%dT%H%M%S')}"
             
             # Create title and details with enhanced information
-            # Aggregate quantities by product for accurate totals
-            products_agg = date_df.groupby('product_pn').agg({
-                'remaining_quantity_to_deliver': 'sum'
-            }).reset_index()
+            # Aggregate quantities by product ID for accurate totals
+            if 'product_id' in date_df.columns:
+                products_agg = date_df.groupby(['product_id', 'pt_code', 'product_pn']).agg({
+                    'remaining_quantity_to_deliver': 'sum'
+                }).reset_index()
+            else:
+                products_agg = date_df.groupby(['pt_code', 'product_pn']).agg({
+                    'remaining_quantity_to_deliver': 'sum'
+                }).reset_index()
             
             total_deliveries = len(date_df.groupby(['customer', 'recipient_company'])) if isinstance(date_df, pd.DataFrame) else 1
             total_line_items = len(date_df)
@@ -184,7 +205,9 @@ END:VEVENT
             out_of_stock_count = 0
             if 'delivery_timeline_status' in date_df.columns:
                 overdue_count = date_df[date_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
-            if 'product_fulfillment_status' in date_df.columns:
+            if 'product_fulfillment_status' in date_df.columns and 'product_id' in date_df.columns:
+                out_of_stock_count = date_df[date_df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
+            elif 'product_fulfillment_status' in date_df.columns:
                 out_of_stock_count = date_df[date_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
             
             # Add status indicator
@@ -220,20 +243,23 @@ END:VEVENT
                         days_overdue = cust_df['days_overdue'].iloc[0]
                         details += f"  ⚠️ OVERDUE by {days_overdue} days\n"
                 
-                # Aggregate products and quantities with status
-                if 'product_fulfillment_status' in cust_df.columns:
-                    prod_summary = cust_df.groupby(['product_pn', 'product_fulfillment_status'])['remaining_quantity_to_deliver'].sum()
-                    for (prod, status), qty in prod_summary.items():
+                # Aggregate products and quantities with status by product_id
+                if 'product_id' in cust_df.columns:
+                    prod_summary = cust_df.groupby(['product_id', 'pt_code', 'product_pn'])['remaining_quantity_to_deliver'].sum()
+                    for (prod_id, pt_code, prod_pn), qty in prod_summary.items():
                         status_icon = ""
-                        if status == 'Out of Stock':
-                            status_icon = " ❌"
-                        elif status == 'Can Fulfill Partial':
-                            status_icon = " ⚠️"
-                        details += f"  📦 {prod}: {qty:,.0f} units{status_icon}\n"
+                        if 'product_fulfillment_status' in cust_df.columns:
+                            prod_status = cust_df[cust_df['product_id'] == prod_id]['product_fulfillment_status'].iloc[0]
+                            if prod_status == 'Out of Stock':
+                                status_icon = " ❌"
+                            elif prod_status == 'Can Fulfill Partial':
+                                status_icon = " ⚠️"
+                        details += f"  📦 {pt_code} {prod_pn}: {qty:,.0f} units{status_icon}\n"
                 else:
-                    prod_summary = cust_df.groupby('product_pn')['remaining_quantity_to_deliver'].sum()
-                    for prod, qty in prod_summary.items():
-                        details += f"  📦 {prod}: {qty:,.0f} units\n"
+                    # Fallback if product_id not available
+                    prod_summary = cust_df.groupby(['pt_code', 'product_pn'])['remaining_quantity_to_deliver'].sum()
+                    for (pt_code, prod_pn), qty in prod_summary.items():
+                        details += f"  📦 {pt_code} {prod_pn}: {qty:,.0f} units\n"
             
             # Get locations
             locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
@@ -289,10 +315,15 @@ END:VEVENT
             enddt = end_dt.strftime('%Y-%m-%dT%H:%M:%S')
             
             # Create title and body with enhanced information
-            # Aggregate quantities by product for accurate totals
-            products_agg = date_df.groupby('product_pn').agg({
-                'remaining_quantity_to_deliver': 'sum'
-            }).reset_index()
+            # Aggregate quantities by product ID for accurate totals
+            if 'product_id' in date_df.columns:
+                products_agg = date_df.groupby(['product_id', 'pt_code', 'product_pn']).agg({
+                    'remaining_quantity_to_deliver': 'sum'
+                }).reset_index()
+            else:
+                products_agg = date_df.groupby(['pt_code', 'product_pn']).agg({
+                    'remaining_quantity_to_deliver': 'sum'
+                }).reset_index()
             
             total_deliveries = len(date_df.groupby(['customer', 'recipient_company'])) if isinstance(date_df, pd.DataFrame) else 1
             total_line_items = len(date_df)
@@ -303,7 +334,9 @@ END:VEVENT
             out_of_stock_count = 0
             if 'delivery_timeline_status' in date_df.columns:
                 overdue_count = date_df[date_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
-            if 'product_fulfillment_status' in date_df.columns:
+            if 'product_fulfillment_status' in date_df.columns and 'product_id' in date_df.columns:
+                out_of_stock_count = date_df[date_df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
+            elif 'product_fulfillment_status' in date_df.columns:
                 out_of_stock_count = date_df[date_df['product_fulfillment_status'] == 'Out of Stock']['product_pn'].nunique()
             
             # Add status indicator
@@ -339,20 +372,23 @@ END:VEVENT
                         days_overdue = cust_df['days_overdue'].iloc[0]
                         body += f"  <strong style='color:red'>⚠️ OVERDUE by {days_overdue} days</strong><br>"
                 
-                # Aggregate products and quantities with status
-                if 'product_fulfillment_status' in cust_df.columns:
-                    prod_summary = cust_df.groupby(['product_pn', 'product_fulfillment_status'])['remaining_quantity_to_deliver'].sum()
-                    for (prod, status), qty in prod_summary.items():
+                # Aggregate products and quantities with status by product_id
+                if 'product_id' in cust_df.columns:
+                    prod_summary = cust_df.groupby(['product_id', 'pt_code', 'product_pn'])['remaining_quantity_to_deliver'].sum()
+                    for (prod_id, pt_code, prod_pn), qty in prod_summary.items():
                         status_style = ""
-                        if status == 'Out of Stock':
-                            status_style = " style='color:red'"
-                        elif status == 'Can Fulfill Partial':
-                            status_style = " style='color:orange'"
-                        body += f"  📦 <span{status_style}>{prod}: {qty:,.0f} units</span><br>"
+                        if 'product_fulfillment_status' in cust_df.columns:
+                            prod_status = cust_df[cust_df['product_id'] == prod_id]['product_fulfillment_status'].iloc[0]
+                            if prod_status == 'Out of Stock':
+                                status_style = " style='color:red'"
+                            elif prod_status == 'Can Fulfill Partial':
+                                status_style = " style='color:orange'"
+                        body += f"  📦 <span{status_style}>{pt_code} {prod_pn}: {qty:,.0f} units</span><br>"
                 else:
-                    prod_summary = cust_df.groupby('product_pn')['remaining_quantity_to_deliver'].sum()
-                    for prod, qty in prod_summary.items():
-                        body += f"  📦 {prod}: {qty:,.0f} units<br>"
+                    # Fallback if product_id not available
+                    prod_summary = cust_df.groupby(['pt_code', 'product_pn'])['remaining_quantity_to_deliver'].sum()
+                    for (pt_code, prod_pn), qty in prod_summary.items():
+                        body += f"  📦 {pt_code} {prod_pn}: {qty:,.0f} units<br>"
             
             # Get locations
             locations = date_df.apply(lambda x: f"{x['recipient_state_province']}, {x['recipient_country_name']}", axis=1).unique()
@@ -422,7 +458,11 @@ METHOD:REQUEST
         
         # Count urgent items
         overdue_deliveries = urgent_df[urgent_df.get('delivery_timeline_status') == 'Overdue']['delivery_id'].nunique() if 'delivery_timeline_status' in urgent_df.columns else 0
-        out_of_stock_products = urgent_df[urgent_df.get('product_fulfillment_status') == 'Out of Stock']['product_pn'].nunique() if 'product_fulfillment_status' in urgent_df.columns else 0
+        out_of_stock_products = 0
+        if 'product_fulfillment_status' in urgent_df.columns and 'product_id' in urgent_df.columns:
+            out_of_stock_products = urgent_df[urgent_df.get('product_fulfillment_status') == 'Out of Stock']['product_id'].nunique()
+        elif 'product_fulfillment_status' in urgent_df.columns:
+            out_of_stock_products = urgent_df[urgent_df.get('product_fulfillment_status') == 'Out of Stock']['product_pn'].nunique()
         
         summary = f"🚨 URGENT: {overdue_deliveries} Overdue Deliveries, {out_of_stock_products} Out of Stock"
         
