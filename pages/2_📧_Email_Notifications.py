@@ -46,13 +46,17 @@ def get_sales_list():
             e.keycloak_id,
             CONCAT(e.first_name, ' ', e.last_name) as name,
             e.email,
-            COUNT(DISTINCT d.delivery_id) as active_deliveries
+            COUNT(DISTINCT d.delivery_id) as active_deliveries,
+            e.manager_id,
+            m.email as manager_email,
+            CONCAT(m.first_name, ' ', m.last_name) as manager_name
         FROM employees e
+        LEFT JOIN employees m ON e.manager_id = m.id
         INNER JOIN delivery_full_view d ON d.created_by_email = e.email
         WHERE d.etd >= CURDATE()
             AND d.etd <= DATE_ADD(CURDATE(), INTERVAL 4 WEEK)
             AND d.remaining_quantity_to_deliver > 0
-        GROUP BY e.id, e.keycloak_id, e.first_name, e.last_name, e.email
+        GROUP BY e.id, e.keycloak_id, e.first_name, e.last_name, e.email, e.manager_id, m.email, m.first_name, m.last_name
         ORDER BY name
         """)
         
@@ -76,13 +80,17 @@ def get_sales_list_overdue():
             CONCAT(e.first_name, ' ', e.last_name) as name,
             e.email,
             COUNT(DISTINCT CASE WHEN d.delivery_timeline_status = 'Overdue' THEN d.delivery_id END) as overdue_deliveries,
-            COUNT(DISTINCT CASE WHEN d.delivery_timeline_status = 'Due Today' THEN d.delivery_id END) as due_today_deliveries
+            COUNT(DISTINCT CASE WHEN d.delivery_timeline_status = 'Due Today' THEN d.delivery_id END) as due_today_deliveries,
+            e.manager_id,
+            m.email as manager_email,
+            CONCAT(m.first_name, ' ', m.last_name) as manager_name
         FROM employees e
+        LEFT JOIN employees m ON e.manager_id = m.id
         INNER JOIN delivery_full_view d ON d.created_by_email = e.email
         WHERE d.delivery_timeline_status IN ('Overdue', 'Due Today')
             AND d.remaining_quantity_to_deliver > 0
             AND d.shipment_status NOT IN ('DELIVERED', 'COMPLETED')
-        GROUP BY e.id, e.keycloak_id, e.first_name, e.last_name, e.email
+        GROUP BY e.id, e.keycloak_id, e.first_name, e.last_name, e.email, e.manager_id, m.email, m.first_name, m.last_name
         HAVING (overdue_deliveries > 0 OR due_today_deliveries > 0)
         ORDER BY overdue_deliveries DESC, due_today_deliveries DESC, name
         """)
@@ -176,13 +184,33 @@ with col2:
         st.session_state.notification_type = notification_type
         st.rerun()
     
-    # CC options
-    include_cc = st.checkbox("Include CC to managers")
-    if include_cc:
-        cc_emails = st.text_area(
-            "CC Email addresses (one per line)",
-            placeholder="manager1@company.com\nmanager2@company.com"
-        ).strip().split('\n') if include_cc else []
+    # CC options - Default checked
+    include_cc = st.checkbox("Include CC to managers", value=True)
+    
+    if include_cc and selected_sales:
+        # Get unique manager emails from selected sales
+        selected_df = sales_df[sales_df['name'].isin(selected_sales)]
+        manager_emails = selected_df[selected_df['manager_email'].notna()]['manager_email'].unique().tolist()
+        
+        # Show auto-detected managers
+        if manager_emails:
+            st.info(f"Auto-detected managers: {', '.join(manager_emails)}")
+        
+        # Additional CC emails
+        additional_cc = st.text_area(
+            "Additional CC Email addresses (one per line)",
+            placeholder="manager1@company.com\nmanager2@company.com",
+            help="Manager emails are automatically included. Add any additional recipients here."
+        ).strip()
+        
+        # Combine manager emails with additional emails
+        cc_emails = manager_emails.copy()
+        if additional_cc:
+            additional_emails = [email.strip() for email in additional_cc.split('\n') if email.strip()]
+            cc_emails.extend(additional_emails)
+        
+        # Remove duplicates while preserving order
+        cc_emails = list(dict.fromkeys(cc_emails))
     else:
         cc_emails = []
     
@@ -382,40 +410,6 @@ if selected_sales and schedule_type == "Send Now":
             with st.expander("❌ Error Details"):
                 for error in errors:
                     st.error(error)
-        
-        # Log activity
-        try:
-            log_query = text("""
-            INSERT INTO email_logs (
-                sender_id, 
-                email_type, 
-                recipients_count,
-                success_count,
-                failed_count,
-                created_date
-            ) VALUES (
-                :sender_id,
-                :email_type,
-                :total,
-                :success,
-                :failed,
-                NOW()
-            )
-            """)
-            
-            email_type = 'urgent_alert' if notification_type == "🚨 Overdue Alerts" else 'delivery_schedule'
-            
-            with data_loader.engine.connect() as conn:
-                conn.execute(log_query, {
-                    'sender_id': st.session_state.get('user_id'),
-                    'email_type': email_type,
-                    'total': len(selected_sales),
-                    'success': success_count,
-                    'failed': failed_count
-                })
-                conn.commit()
-        except:
-            pass  # Ignore logging errors
 
 # Help section
 with st.expander("ℹ️ Help & Information"):

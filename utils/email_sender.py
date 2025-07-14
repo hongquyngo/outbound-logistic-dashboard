@@ -269,14 +269,14 @@ class EmailSender:
                 <h3>📋 Required Actions:</h3>
                 <ol>
                     <li><strong>Contact Customers:</strong> Inform customers about delivery delays and provide updated ETAs</li>
-                    <li><strong>Coordinate with Outbound:</strong> Check inventory availability for out-of-stock items</li>
+                    <li><strong>Coordinate with Warehouse:</strong> Check inventory availability for out-of-stock items</li>
                     <li><strong>Update Delivery Status:</strong> Ensure all delivery statuses are current in the system</li>
                     <li><strong>Escalate if Needed:</strong> For deliveries overdue by 5+ days, escalate to management</li>
                 </ol>
                 
                 <p><strong>Logistics Team Contact:</strong><br>
                 📧 Email: outbound@prostech.vn<br>
-                📞 Phone: +84 28 xxxx xxxx</p>
+                📞 Phone: +84 33 476273</p>
             </div>
             
             <div class="footer">
