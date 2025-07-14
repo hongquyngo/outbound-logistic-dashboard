@@ -294,7 +294,7 @@ with col2:
                     "- Action items and contacts")
         else:  # Custom Clearance
             st.info("Email will include:\n"
-                    "- 🛃 Custom clearance schedule header\n"
+                    "- 🛃 Outbound Custom clearance schedule header\n"
                     "- EPE companies (export at place) summary\n"
                     "- Foreign customers by country\n"
                     "- Weekly timeline for customs planning\n"
