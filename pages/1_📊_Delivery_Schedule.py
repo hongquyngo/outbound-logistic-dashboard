@@ -25,31 +25,47 @@ if not auth_manager.check_session():
 data_loader = DeliveryDataLoader()
 
 st.title("📊 Delivery Schedule")
-# st.markdown("---")
+
+
+# Get filter options
+filter_options = data_loader.get_filter_options()
 
 # Filter Section
 with st.expander("🔍 Filters", expanded=True):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # Date range
+        # Date range - NOW DYNAMIC
+        date_range_options = filter_options.get('date_range', {})
+        min_date = date_range_options.get('min_date', datetime.now().date() - timedelta(days=365))
+        max_date = date_range_options.get('max_date', datetime.now().date() + timedelta(days=365))
+        
+        # Convert to date if datetime
+        if hasattr(min_date, 'date'):
+            min_date = min_date.date()
+        if hasattr(max_date, 'date'):
+            max_date = max_date.date()
+        
+        # Set default date range to full available range
+        default_start = min_date if min_date else datetime.now().date() - timedelta(days=365)
+        default_end = max_date if max_date else datetime.now().date() + timedelta(days=365)
+
         date_range = st.date_input(
             "Date Range",
-            value=(datetime.now().date(), datetime.now().date() + timedelta(days=30)),
-            min_value=datetime.now().date() - timedelta(days=365),
-            max_value=datetime.now().date() + timedelta(days=365)
+            value=(default_start, default_end),
+            min_value=min_date,
+            max_value=max_date,
+            help=f"Available data from {min_date} to {max_date}"
         )
         
-        # View period
-        view_period = st.radio(
-            "View By",
-            options=['daily', 'weekly', 'monthly'],
-            index=1,
-            horizontal=True
+        # Legal Entity filter
+        selected_legal_entities = st.multiselect(
+            "Legal Entity",
+            options=filter_options.get('legal_entities', []),
+            default=None,
+            placeholder="All legal entities",
+            help="Filter by selling company/legal entity"
         )
-    
-    # Get filter options
-    filter_options = data_loader.get_filter_options()
     
     with col2:
         # Creator filter
@@ -99,25 +115,27 @@ with st.expander("🔍 Filters", expanded=True):
     col4, col5, col6 = st.columns(3)
 
     with col4:
-        # EPE Company filter
+        # EPE Company filter - NOW DYNAMIC
+        epe_options = filter_options.get('epe_options', ["All"])
         epe_filter = st.selectbox(
             "EPE Company Filter",
-            options=["All", "EPE Companies Only", "Non-EPE Companies Only"],
+            options=epe_options,
             index=0,
             help="Filter by EPE company type. EPE companies are a specific customer category."
         )
 
     with col5:
-        # Foreign customer filter
+        # Foreign customer filter - NOW DYNAMIC
+        foreign_options = filter_options.get('foreign_options', ["All Customers"])
         foreign_filter = st.selectbox(
             "Customer Type",
-            options=["All Customers", "Domestic Only", "Foreign Only"],
+            options=foreign_options,
             index=0,
             help="Filter by customer location. Domestic = same country as seller, Foreign = different country."
         )
 
     with col6:
-        # Timeline status filter (NEW)
+        # Timeline status filter
         selected_timeline = st.multiselect(
             "Delivery Timeline Status",
             options=filter_options.get('timeline_statuses', []),
@@ -141,7 +159,8 @@ filters = {
     'countries': selected_countries if selected_countries else None,
     'epe_filter': epe_filter,
     'foreign_filter': foreign_filter,
-    'timeline_status': selected_timeline if selected_timeline else None
+    'timeline_status': selected_timeline if selected_timeline else None,
+    'legal_entities': selected_legal_entities if selected_legal_entities else None
 }
 
 # Load data
@@ -194,18 +213,29 @@ if df is not None and not df.empty:
     
     # st.markdown("---")
     
-    # Pivot view
-    st.subheader(f"📅 Delivery Schedule - {view_period.capitalize()} View")
-    
-    # Get pivoted data
-    pivot_df = data_loader.pivot_delivery_data(df, view_period)
-    
-    if not pivot_df.empty:
-        # Create tabs for different views
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Pivot Table", "📈 Charts", "📋 Detailed List", "🔍 Product Analysis"])
+
+    # Create tabs for different views
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Pivot Table", "📈 Charts", "📋 Detailed List", "🔍 Product Analysis"])
+
+    with tab1:
+        st.subheader("📊 Pivot Table View")
         
-        with tab1:
-            # Pivot table view
+        # View period selector - NOW HERE
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            view_period = st.radio(
+                "View Period:",
+                options=['daily', 'weekly', 'monthly'],
+                index=1,  # Default to weekly
+                horizontal=True,
+                help="Select how to group delivery data in the pivot table"
+            )
+        
+        # Get pivoted data with selected period
+        pivot_df = data_loader.pivot_delivery_data(df, view_period)
+        
+        if not pivot_df.empty:
+            # Rest of pivot table code
             if st.checkbox("Group by Customer"):
                 pivot_table = pivot_df.pivot_table(
                     index='Customer',
@@ -226,182 +256,184 @@ if df is not None and not df.empty:
             st.download_button(
                 label="📥 Download as CSV",
                 data=csv,
-                file_name=f"delivery_schedule_{datetime.now().strftime('%Y%m%d')}.csv",
+                file_name=f"delivery_schedule_{view_period}_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime='text/csv'
             )
+        else:
+            st.info("No data available for pivot view")
+
+    with tab2:
+        # Charts
+        col1, col2 = st.columns(2)
         
-        with tab2:
-            # Charts
-            col1, col2 = st.columns(2)
+        with col1:
+            # Timeline chart with status breakdown
+            timeline_df = df.groupby([pd.to_datetime(df['etd']).dt.date, 'delivery_timeline_status']).agg({
+                'delivery_id': 'nunique'
+            }).reset_index()
+            timeline_df.columns = ['Date', 'Status', 'Count']
             
-            with col1:
-                # Timeline chart with status breakdown
-                timeline_df = df.groupby([pd.to_datetime(df['etd']).dt.date, 'delivery_timeline_status']).agg({
-                    'delivery_id': 'nunique'
-                }).reset_index()
-                timeline_df.columns = ['Date', 'Status', 'Count']
-                
-                fig1 = px.bar(
-                    timeline_df,
-                    x='Date',
-                    y='Count',
-                    color='Status',
-                    title='Delivery Timeline Status',
-                    color_discrete_map={
-                        'Completed': '#2ecc71',
-                        'On Schedule': '#3498db',
-                        'Due Today': '#f39c12',
-                        'Overdue': '#e74c3c',
-                        'No ETD': '#95a5a6'
-                    }
-                )
-                st.plotly_chart(fig1, use_container_width=True)
-            
-            with col2:
-                # Product fulfillment status distribution
-                fulfillment_df = df.groupby('product_fulfillment_status')['product_id'].nunique().reset_index()
-                fulfillment_df.columns = ['Status', 'Product Count']
-                
-                fig2 = px.pie(
-                    fulfillment_df, 
-                    values='Product Count', 
-                    names='Status',
-                    title='Product Fulfillment Status',
-                    color_discrete_map={
-                        'Can Fulfill All': '#2ecc71',
-                        'Can Fulfill Partial': '#f39c12',
-                        'Out of Stock': '#e74c3c',
-                        'Ready to Ship': '#3498db',
-                        'Delivered': '#95a5a6'
-                    }
-                )
-                st.plotly_chart(fig2, use_container_width=True)
-            
-            # Days overdue distribution (NEW)
-            overdue_df = df[df['days_overdue'].notna()].copy()
-            if not overdue_df.empty:
-                fig3 = px.histogram(
-                    overdue_df,
-                    x='days_overdue',
-                    nbins=20,
-                    title='Distribution of Overdue Days',
-                    labels={'days_overdue': 'Days Overdue', 'count': 'Number of Deliveries'}
-                )
-                fig3.update_traces(marker_color='#e74c3c')
-                st.plotly_chart(fig3, use_container_width=True)
-        
-        with tab3:
-            # Detailed list
-            st.subheader("📋 Detailed Delivery List")
-            
-            # Select columns to display - Updated with new fields
-            default_columns = ['dn_number', 'customer', 'recipient_company', 'etd', 
-                             'pt_code', 'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
-                             'product_fulfill_rate_percent', 'delivery_timeline_status',
-                             'days_overdue', 'shipment_status_vn', 'product_fulfillment_status', 
-                             'is_epe_company']
-            
-            display_columns = st.multiselect(
-                "Select columns to display",
-                options=df.columns.tolist(),
-                default=[col for col in default_columns if col in df.columns]
+            fig1 = px.bar(
+                timeline_df,
+                x='Date',
+                y='Count',
+                color='Status',
+                title='Delivery Timeline Status',
+                color_discrete_map={
+                    'Completed': '#2ecc71',
+                    'On Schedule': '#3498db',
+                    'Due Today': '#f39c12',
+                    'Overdue': '#e74c3c',
+                    'No ETD': '#95a5a6'
+                }
             )
-            
-            if display_columns:
-                display_df = df[display_columns].copy()
-                
-                # Format date columns
-                date_columns = ['etd', 'created_date', 'delivered_date', 'dispatched_date']
-                for col in date_columns:
-                    if col in display_df.columns:
-                        display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%Y-%m-%d')
-                
-                # Apply conditional formatting
-                def highlight_timeline(val):
-                    if val == 'Overdue':
-                        return 'background-color: #ffcccb'
-                    elif val == 'Due Today':
-                        return 'background-color: #ffe4b5'
-                    elif val == 'On Schedule':
-                        return 'background-color: #90ee90'
-                    elif val == 'Completed':
-                        return 'background-color: #e0e0e0'
-                    return ''
-                
-                def highlight_fulfillment(val):
-                    if val == 'Out of Stock':
-                        return 'background-color: #ffcccb'
-                    elif val == 'Can Fulfill Partial':
-                        return 'background-color: #ffe4b5'
-                    elif val == 'Can Fulfill All':
-                        return 'background-color: #90ee90'
-                    return ''
-                
-                def highlight_epe(val):
-                    if val == 'Yes':
-                        return 'font-weight: bold; color: #1976d2'
-                    return ''
-                
-                styled_df = display_df.style
-                
-                if 'delivery_timeline_status' in display_df.columns:
-                    styled_df = styled_df.applymap(
-                        highlight_timeline, 
-                        subset=['delivery_timeline_status']
-                    )
-                
-                if 'product_fulfillment_status' in display_df.columns:
-                    styled_df = styled_df.applymap(
-                        highlight_fulfillment,
-                        subset=['product_fulfillment_status']
-                    )
-                
-                if 'is_epe_company' in display_df.columns:
-                    styled_df = styled_df.applymap(
-                        highlight_epe,
-                        subset=['is_epe_company']
-                    )
-                
-                st.dataframe(styled_df, use_container_width=True)
+            st.plotly_chart(fig1, use_container_width=True)
         
-        with tab4:
-            # Product Analysis tab (NEW)
-            st.subheader("🔍 Product Demand Analysis")
+        with col2:
+            # Product fulfillment status distribution
+            fulfillment_df = df.groupby('product_fulfillment_status')['product_id'].nunique().reset_index()
+            fulfillment_df.columns = ['Status', 'Product Count']
             
-            # Get product demand analysis
-            product_analysis = data_loader.get_product_demand_analysis()
+            fig2 = px.pie(
+                fulfillment_df, 
+                values='Product Count', 
+                names='Status',
+                title='Product Fulfillment Status',
+                color_discrete_map={
+                    'Can Fulfill All': '#2ecc71',
+                    'Can Fulfill Partial': '#f39c12',
+                    'Out of Stock': '#e74c3c',
+                    'Ready to Ship': '#3498db',
+                    'Delivered': '#95a5a6'
+                }
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        
+        # Days overdue distribution (NEW)
+        overdue_df = df[df['days_overdue'].notna()].copy()
+        if not overdue_df.empty:
+            fig3 = px.histogram(
+                overdue_df,
+                x='days_overdue',
+                nbins=20,
+                title='Distribution of Overdue Days',
+                labels={'days_overdue': 'Days Overdue', 'count': 'Number of Deliveries'}
+            )
+            fig3.update_traces(marker_color='#e74c3c')
+            st.plotly_chart(fig3, use_container_width=True)
+    
+    with tab3:
+        # Detailed list
+        st.subheader("📋 Detailed Delivery List")
+        
+        # Select columns to display - Updated with new fields
+        default_columns = ['dn_number', 'customer', 'recipient_company', 'etd', 
+                            'pt_code', 'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
+                            'product_fulfill_rate_percent', 'delivery_timeline_status',
+                            'days_overdue', 'shipment_status_vn', 'product_fulfillment_status', 
+                            'is_epe_company']
+        
+        display_columns = st.multiselect(
+            "Select columns to display",
+            options=df.columns.tolist(),
+            default=[col for col in default_columns if col in df.columns]
+        )
+        
+        if display_columns:
+            display_df = df[display_columns].copy()
             
-            if not product_analysis.empty:
-                # Show top products with gaps
-                st.markdown("#### Top Products by Demand Gap")
-                gap_products = product_analysis[product_analysis['gap_quantity'] > 0].head(10)
-                
-                if not gap_products.empty:
-                    fig4 = px.bar(
-                        gap_products,
-                        x='pt_code',
-                        y='gap_quantity',
-                        title='Top 10 Products with Supply Gap',
-                        labels={'gap_quantity': 'Gap Quantity', 'pt_code': 'PT Code'},
-                        color='fulfill_rate',
-                        color_continuous_scale='RdYlGn',
-                        hover_data=['product_pn']
-                    )
-                    st.plotly_chart(fig4, use_container_width=True)
-                
-                # Product demand details
-                st.markdown("#### Product Demand Details")
-                st.dataframe(
-                    product_analysis[['pt_code', 'product_pn', 'active_deliveries', 'total_remaining_demand',
-                                    'total_inventory', 'gap_quantity', 'fulfill_rate', 
-                                    'fulfillment_status']].style.format({
-                        'total_remaining_demand': '{:,.0f}',
-                        'total_inventory': '{:,.0f}',
-                        'gap_quantity': '{:,.0f}',
-                        'fulfill_rate': '{:.1f}%'
-                    }).background_gradient(subset=['fulfill_rate'], cmap='RdYlGn'),
-                    use_container_width=True
+            # Format date columns
+            date_columns = ['etd', 'created_date', 'delivered_date', 'dispatched_date']
+            for col in date_columns:
+                if col in display_df.columns:
+                    display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%Y-%m-%d')
+            
+            # Apply conditional formatting
+            def highlight_timeline(val):
+                if val == 'Overdue':
+                    return 'background-color: #ffcccb'
+                elif val == 'Due Today':
+                    return 'background-color: #ffe4b5'
+                elif val == 'On Schedule':
+                    return 'background-color: #90ee90'
+                elif val == 'Completed':
+                    return 'background-color: #e0e0e0'
+                return ''
+            
+            def highlight_fulfillment(val):
+                if val == 'Out of Stock':
+                    return 'background-color: #ffcccb'
+                elif val == 'Can Fulfill Partial':
+                    return 'background-color: #ffe4b5'
+                elif val == 'Can Fulfill All':
+                    return 'background-color: #90ee90'
+                return ''
+            
+            def highlight_epe(val):
+                if val == 'Yes':
+                    return 'font-weight: bold; color: #1976d2'
+                return ''
+            
+            styled_df = display_df.style
+            
+            if 'delivery_timeline_status' in display_df.columns:
+                styled_df = styled_df.applymap(
+                    highlight_timeline, 
+                    subset=['delivery_timeline_status']
                 )
+            
+            if 'product_fulfillment_status' in display_df.columns:
+                styled_df = styled_df.applymap(
+                    highlight_fulfillment,
+                    subset=['product_fulfillment_status']
+                )
+            
+            if 'is_epe_company' in display_df.columns:
+                styled_df = styled_df.applymap(
+                    highlight_epe,
+                    subset=['is_epe_company']
+                )
+            
+            st.dataframe(styled_df, use_container_width=True)
+    
+    with tab4:
+        # Product Analysis tab (NEW)
+        st.subheader("🔍 Product Demand Analysis")
+        
+        # Get product demand analysis
+        product_analysis = data_loader.get_product_demand_analysis()
+        
+        if not product_analysis.empty:
+            # Show top products with gaps
+            st.markdown("#### Top Products by Demand Gap")
+            gap_products = product_analysis[product_analysis['gap_quantity'] > 0].head(10)
+            
+            if not gap_products.empty:
+                fig4 = px.bar(
+                    gap_products,
+                    x='pt_code',
+                    y='gap_quantity',
+                    title='Top 10 Products with Supply Gap',
+                    labels={'gap_quantity': 'Gap Quantity', 'pt_code': 'PT Code'},
+                    color='fulfill_rate',
+                    color_continuous_scale='RdYlGn',
+                    hover_data=['product_pn']
+                )
+                st.plotly_chart(fig4, use_container_width=True)
+            
+            # Product demand details
+            st.markdown("#### Product Demand Details")
+            st.dataframe(
+                product_analysis[['pt_code', 'product_pn', 'active_deliveries', 'total_remaining_demand',
+                                'total_inventory', 'gap_quantity', 'fulfill_rate', 
+                                'fulfillment_status']].style.format({
+                    'total_remaining_demand': '{:,.0f}',
+                    'total_inventory': '{:,.0f}',
+                    'gap_quantity': '{:,.0f}',
+                    'fulfill_rate': '{:.1f}%'
+                }).background_gradient(subset=['fulfill_rate'], cmap='RdYlGn'),
+                use_container_width=True
+            )
 else:
     st.info("No delivery data found for the selected filters")
 
@@ -422,7 +454,8 @@ if df is not None and not df.empty:
             
             st.dataframe(
                 overdue_summary.style.format({
-                    'Total Qty': '{:,.0f}'
+                    'Total Qty': '{:,.0f}',
+                    'Max Days Overdue': '{:.0f}'
                 }).background_gradient(subset=['Max Days Overdue'], cmap='Reds'),
                 use_container_width=True
             )

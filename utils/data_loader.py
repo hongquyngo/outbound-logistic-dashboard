@@ -156,6 +156,10 @@ class DeliveryDataLoader:
                     query += " AND shipment_status IN :statuses"
                     params['statuses'] = tuple(filters['statuses'])
                 
+                if filters.get('legal_entities'):
+                    query += " AND legal_entity IN :legal_entities"
+                    params['legal_entities'] = tuple(filters['legal_entities'])
+                
                 # EPE Company filter
                 if filters.get('epe_filter'):
                     if filters['epe_filter'] == 'EPE Companies Only':
@@ -189,7 +193,7 @@ class DeliveryDataLoader:
             logger.error(f"Error loading delivery data: {e}")
             st.error(f"Failed to load delivery data: {str(e)}")
             return pd.DataFrame()
-    
+
     def get_filter_options(self):
         """Get unique values for filters"""
         try:
@@ -200,7 +204,8 @@ class DeliveryDataLoader:
                 'states': "SELECT DISTINCT recipient_state_province FROM delivery_full_view WHERE recipient_state_province IS NOT NULL ORDER BY recipient_state_province",
                 'countries': "SELECT DISTINCT recipient_country_name FROM delivery_full_view WHERE recipient_country_name IS NOT NULL ORDER BY recipient_country_name",
                 'statuses': "SELECT DISTINCT shipment_status FROM delivery_full_view WHERE shipment_status IS NOT NULL ORDER BY shipment_status",
-                'timeline_statuses': "SELECT DISTINCT delivery_timeline_status FROM delivery_full_view WHERE delivery_timeline_status IS NOT NULL ORDER BY delivery_timeline_status"
+                'timeline_statuses': "SELECT DISTINCT delivery_timeline_status FROM delivery_full_view WHERE delivery_timeline_status IS NOT NULL ORDER BY delivery_timeline_status",
+                'legal_entities': "SELECT DISTINCT legal_entity FROM delivery_full_view WHERE legal_entity IS NOT NULL ORDER BY legal_entity"
             }
             
             options = {}
@@ -208,13 +213,68 @@ class DeliveryDataLoader:
                 for key, query in queries.items():
                     result = conn.execute(text(query))
                     options[key] = [row[0] for row in result]
+                
+                # NEW: Get date range from ETD
+                date_range_query = """
+                SELECT 
+                    MIN(etd) as min_date,
+                    MAX(etd) as max_date
+                FROM delivery_full_view
+                WHERE etd IS NOT NULL
+                """
+                date_result = conn.execute(text(date_range_query)).fetchone()
+                options['date_range'] = {
+                    'min_date': date_result[0] if date_result[0] else datetime.now().date() - timedelta(days=365),
+                    'max_date': date_result[1] if date_result[1] else datetime.now().date() + timedelta(days=365)
+                }
+                
+                # NEW: Get EPE company options
+                epe_query = """
+                SELECT DISTINCT is_epe_company 
+                FROM delivery_full_view 
+                WHERE is_epe_company IS NOT NULL 
+                ORDER BY is_epe_company
+                """
+                epe_result = conn.execute(text(epe_query))
+                epe_values = [row[0] for row in epe_result]
+                
+                # Create EPE filter options based on actual data
+                epe_options = ["All"]
+                if 'Yes' in epe_values:
+                    epe_options.append("EPE Companies Only")
+                if 'No' in epe_values:
+                    epe_options.append("Non-EPE Companies Only")
+                options['epe_options'] = epe_options
+                
+                # NEW: Get Foreign/Domestic customer options
+                foreign_query = """
+                SELECT DISTINCT
+                    CASE 
+                        WHEN customer_country_code = legal_entity_country_code THEN 'Domestic'
+                        WHEN customer_country_code != legal_entity_country_code THEN 'Foreign'
+                        ELSE 'Unknown'
+                    END as customer_type
+                FROM delivery_full_view
+                WHERE customer_country_code IS NOT NULL 
+                    AND legal_entity_country_code IS NOT NULL
+                """
+                foreign_result = conn.execute(text(foreign_query))
+                foreign_types = [row[0] for row in foreign_result if row[0] != 'Unknown']
+                
+                # Create foreign filter options based on actual data
+                foreign_options = ["All Customers"]
+                if 'Domestic' in foreign_types:
+                    foreign_options.append("Domestic Only")
+                if 'Foreign' in foreign_types:
+                    foreign_options.append("Foreign Only")
+                options['foreign_options'] = foreign_options
             
             return options
             
         except Exception as e:
             logger.error(f"Error getting filter options: {e}")
             return {}
-    
+
     def pivot_delivery_data(self, df, period='weekly'):
         """Pivot delivery data by period"""
         try:
