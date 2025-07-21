@@ -244,12 +244,29 @@ if df is not None and not df.empty:
                     aggfunc='sum',
                     fill_value=0
                 )
+                # Format pivot table with thousand separator
                 st.dataframe(
                     pivot_table.style.format("{:,.0f}").background_gradient(cmap='Blues'),
                     use_container_width=True
                 )
             else:
-                st.dataframe(pivot_df, use_container_width=True)
+                # Format pivot dataframe columns
+                format_dict = {
+                    'Total Quantity': '{:,.0f}',
+                    'Remaining to Deliver': '{:,.0f}',
+                    'Gap (Legacy)': '{:,.0f}',
+                    'Product Gap': '{:,.0f}',
+                    'Total Product Demand': '{:,.0f}',
+                    'Deliveries': '{:,.0f}'
+                }
+                
+                # Apply formats that exist in the dataframe
+                existing_formats = {col: fmt for col, fmt in format_dict.items() if col in pivot_df.columns}
+                
+                st.dataframe(
+                    pivot_df.style.format(existing_formats, na_rep='-'),
+                    use_container_width=True
+                )
             
             # Download button
             csv = pivot_df.to_csv(index=False).encode('utf-8')
@@ -348,6 +365,14 @@ if df is not None and not df.empty:
                 if col in display_df.columns:
                     display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%Y-%m-%d')
             
+            # Define quantity and numeric columns for formatting
+            quantity_columns = ['standard_quantity', 'selling_quantity', 'remaining_quantity_to_deliver',
+                              'stock_out_quantity', 'stock_out_request_quantity', 
+                              'total_instock_at_preferred_warehouse', 'total_instock_all_warehouses',
+                              'gap_quantity', 'product_gap_quantity', 'product_total_remaining_demand']
+            
+            rate_columns = ['product_fulfill_rate_percent', 'fulfill_rate_percent', 'delivery_demand_percentage']
+            
             # Apply conditional formatting
             def highlight_timeline(val):
                 if val == 'Overdue':
@@ -374,7 +399,46 @@ if df is not None and not df.empty:
                     return 'font-weight: bold; color: #1976d2'
                 return ''
             
-            styled_df = display_df.style
+            def color_fulfill_rate(val):
+                """Color code fulfillment rate"""
+                try:
+                    if pd.isna(val):
+                        return ''
+                    num_val = float(str(val).replace('%', ''))
+                    if num_val >= 100:
+                        return 'color: green; font-weight: bold'
+                    elif num_val >= 50:
+                        return 'color: orange'
+                    else:
+                        return 'color: red; font-weight: bold'
+                except:
+                    return ''
+            
+            # Create format dict for numeric columns
+            format_dict = {}
+            
+            # Format quantity columns - no decimals, thousand separator
+            for col in quantity_columns:
+                if col in display_df.columns:
+                    format_dict[col] = '{:,.0f}'
+            
+            # Format rate columns - 1 decimal place with % sign
+            for col in rate_columns:
+                if col in display_df.columns:
+                    format_dict[col] = '{:.1f}%'
+            
+            # Format days overdue - no decimals
+            if 'days_overdue' in display_df.columns:
+                format_dict['days_overdue'] = '{:.0f}'
+            
+            # Format currency columns if any
+            currency_columns = ['shipping_cost', 'export_tax']
+            for col in currency_columns:
+                if col in display_df.columns:
+                    format_dict[col] = '{:,.2f}'
+            
+            # Apply styling
+            styled_df = display_df.style.format(format_dict, na_rep='-')
             
             if 'delivery_timeline_status' in display_df.columns:
                 styled_df = styled_df.applymap(
@@ -393,6 +457,14 @@ if df is not None and not df.empty:
                     highlight_epe,
                     subset=['is_epe_company']
                 )
+            
+            # Apply color to fulfillment rate columns
+            for col in rate_columns:
+                if col in display_df.columns:
+                    styled_df = styled_df.applymap(
+                        color_fulfill_rate,
+                        subset=[col]
+                    )
             
             st.dataframe(styled_df, use_container_width=True)
     
@@ -419,21 +491,43 @@ if df is not None and not df.empty:
                     color_continuous_scale='RdYlGn',
                     hover_data=['product_pn']
                 )
+                # Add text labels on bars
+                fig4.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
                 st.plotly_chart(fig4, use_container_width=True)
             
             # Product demand details
             st.markdown("#### Product Demand Details")
-            st.dataframe(
-                product_analysis[['pt_code', 'product_pn', 'active_deliveries', 'total_remaining_demand',
-                                'total_inventory', 'gap_quantity', 'fulfill_rate', 
-                                'fulfillment_status']].style.format({
-                    'total_remaining_demand': '{:,.0f}',
-                    'total_inventory': '{:,.0f}',
-                    'gap_quantity': '{:,.0f}',
-                    'fulfill_rate': '{:.1f}%'
-                }).background_gradient(subset=['fulfill_rate'], cmap='RdYlGn'),
-                use_container_width=True
+            
+            # Define formatting function for fulfillment status color
+            def color_fulfillment_status(val):
+                if val == 'Out of Stock':
+                    return 'background-color: #ffcccb; color: #721c24'
+                elif val == 'Partial Fulfilled':
+                    return 'background-color: #fff3cd; color: #856404'
+                elif val == 'Fulfilled' or val == 'Can Fulfill All':
+                    return 'background-color: #d4edda; color: #155724'
+                return ''
+            
+            # Apply styling to product analysis table
+            styled_product_df = product_analysis[['pt_code', 'product_pn', 'active_deliveries', 'total_remaining_demand',
+                                                 'total_inventory', 'gap_quantity', 'fulfill_rate', 
+                                                 'fulfillment_status']].style.format({
+                'total_remaining_demand': '{:,.0f}',
+                'total_inventory': '{:,.0f}',
+                'gap_quantity': '{:,.0f}',
+                'fulfill_rate': '{:.1f}%',
+                'active_deliveries': '{:,.0f}'
+            }, na_rep='-').background_gradient(
+                subset=['fulfill_rate'], 
+                cmap='RdYlGn',
+                vmin=0,
+                vmax=100
+            ).applymap(
+                color_fulfillment_status,
+                subset=['fulfillment_status']
             )
+            
+            st.dataframe(styled_product_df, use_container_width=True)
 else:
     st.info("No delivery data found for the selected filters")
 
@@ -455,8 +549,15 @@ if df is not None and not df.empty:
             st.dataframe(
                 overdue_summary.style.format({
                     'Total Qty': '{:,.0f}',
-                    'Max Days Overdue': '{:.0f}'
-                }).background_gradient(subset=['Max Days Overdue'], cmap='Reds'),
+                    'Max Days Overdue': '{:.0f} days',
+                    'Deliveries': '{:,.0f}'
+                }, na_rep='-').background_gradient(
+                    subset=['Max Days Overdue'], 
+                    cmap='Reds'
+                ).bar(
+                    subset=['Total Qty'],
+                    color='#ff6b6b'
+                ),
                 use_container_width=True
             )
 
