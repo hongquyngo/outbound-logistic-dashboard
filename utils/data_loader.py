@@ -571,8 +571,146 @@ class DeliveryDataLoader:
         except Exception as e:
             logger.error(f"Error getting product demand analysis: {e}")
             return pd.DataFrame()
+
+    def get_product_demand_from_dataframe(self, df):
+        """Calculate product demand analysis from filtered dataframe
         
-    # Add these methods to utils/data_loader.py
+        This method ensures consistency with filtered data shown in other tabs
+        """
+        try:
+            if df.empty:
+                return pd.DataFrame()
+            
+            # Filter out delivered items to focus on active demand
+            active_df = df[
+                (df['remaining_quantity_to_deliver'] > 0) & 
+                (~df['shipment_status'].isin(['DELIVERED', 'COMPLETED']))
+            ].copy()
+            
+            if active_df.empty:
+                logger.info("No active deliveries found after filtering")
+                return pd.DataFrame()
+            
+            # Validate product-level metrics consistency
+            product_metrics = ['product_gap_quantity', 'product_total_remaining_demand', 
+                            'product_fulfill_rate_percent', 'product_fulfillment_status']
+            
+            # Check which metrics actually exist in the dataframe
+            existing_metrics = [metric for metric in product_metrics if metric in active_df.columns]
+            
+            if not existing_metrics:
+                logger.warning("No product-level metrics found in dataframe. Some analysis features may be limited.")
+            
+            for metric in existing_metrics:
+                # Check for data availability
+                non_null_count = active_df[metric].notna().sum()
+                if non_null_count == 0:
+                    logger.warning(f"{metric} column exists but contains no valid data")
+                else:
+                    # Check consistency
+                    inconsistent = active_df.groupby('product_id')[metric].nunique()
+                    inconsistent_products = inconsistent[inconsistent > 1]
+                    if len(inconsistent_products) > 0:
+                        logger.warning(f"Inconsistent {metric} values found for {len(inconsistent_products)} products")
+            
+            # Group by product to get aggregated metrics
+            # Build aggregation dict dynamically based on available columns
+            agg_dict = {
+                'delivery_id': 'nunique',
+                'remaining_quantity_to_deliver': 'sum',
+                'customer': lambda x: ', '.join(sorted(x.unique())[:5]),  # Top 5 customers
+                'preferred_warehouse': 'nunique'  # Count of unique warehouses
+            }
+            
+            # Add optional columns if they exist
+            optional_aggs = {
+                'oc_number': 'nunique',
+                'total_instock_all_warehouses': lambda x: x.max() if x.notna().any() else 0,
+                'total_instock_at_preferred_warehouse': lambda x: x.max() if x.notna().any() else 0,
+                'product_gap_quantity': lambda x: x.max() if x.notna().any() else 0,
+                'product_total_remaining_demand': lambda x: x.max() if x.notna().any() else 0,
+                'product_fulfill_rate_percent': lambda x: x[x.notna()].mean() if x.notna().any() else None,  # Keep None to identify missing data
+                'product_fulfillment_status': lambda x: (
+                    'Out of Stock' if any(x == 'Out of Stock') 
+                    else 'Can Fulfill Partial' if any(x == 'Can Fulfill Partial')
+                    else 'Can Fulfill All' if any(x == 'Can Fulfill All')
+                    else x.mode()[0] if len(x.mode()) > 0 
+                    else (x.iloc[0] if len(x) > 0 else 'Unknown')
+                ),
+                'delivery_demand_percentage': lambda x: x[x.notna()].mean() if x.notna().any() else 0
+            }
+            
+            for col, agg_func in optional_aggs.items():
+                if col in active_df.columns:
+                    agg_dict[col] = agg_func
+            
+            # Group by product
+            product_analysis = active_df.groupby(['product_id', 'product_pn', 'pt_code']).agg(agg_dict).reset_index()
+            
+            # Rename columns - keep original names but add meaningful ones
+            column_mapping = {
+                'delivery_id': 'active_deliveries',
+                'oc_number': 'unique_orders',
+                'remaining_quantity_to_deliver': 'total_remaining_demand',
+                'total_instock_all_warehouses': 'total_inventory',
+                'total_instock_at_preferred_warehouse': 'preferred_warehouse_inventory',
+                'product_gap_quantity': 'gap_quantity',
+                'product_total_remaining_demand': 'product_total_demand',
+                'product_fulfill_rate_percent': 'fulfill_rate',
+                'product_fulfillment_status': 'fulfillment_status',
+                'delivery_demand_percentage': 'avg_demand_percentage',
+                'customer': 'top_customers',
+                'preferred_warehouse': 'warehouse_count'
+            }
+            
+            # Apply column renaming for columns that exist
+            product_analysis = product_analysis.rename(columns=column_mapping)
+            
+            # Sort by gap quantity (descending) to show most critical products first
+            if 'gap_quantity' in product_analysis.columns:
+                product_analysis = product_analysis.sort_values('gap_quantity', ascending=False)
+                
+                # Add gap percentage calculation
+                product_analysis['gap_percentage'] = (
+                    product_analysis['gap_quantity'].abs() / 
+                    product_analysis['total_remaining_demand'].replace(0, 1) * 100
+                )
+            else:
+                # If no gap_quantity, sort by total_remaining_demand
+                product_analysis = product_analysis.sort_values('total_remaining_demand', ascending=False)
+            
+            # After aggregation, recalculate fulfillment status based on actual data
+            # This ensures consistency with the displayed metrics
+            if 'fulfill_rate' in product_analysis.columns and 'gap_quantity' in product_analysis.columns:
+                def determine_fulfillment_status(row):
+                    if pd.isna(row['fulfill_rate']) or pd.isna(row['gap_quantity']):
+                        return 'Unknown'
+                    elif row['gap_quantity'] <= 0:
+                        return 'Can Fulfill All'
+                    elif row['fulfill_rate'] == 0:
+                        return 'Out of Stock'
+                    elif row['fulfill_rate'] < 100:
+                        return 'Can Fulfill Partial'
+                    else:
+                        return 'Can Fulfill All'
+                
+                product_analysis['fulfillment_status'] = product_analysis.apply(determine_fulfillment_status, axis=1)
+            
+            # Clean up NaN values in numeric columns
+            numeric_columns = ['fulfill_rate', 'gap_quantity', 'total_inventory', 
+                            'preferred_warehouse_inventory', 'gap_percentage',
+                            'avg_demand_percentage', 'product_total_demand']
+            
+            for col in numeric_columns:
+                if col in product_analysis.columns:
+                    product_analysis[col] = product_analysis[col].fillna(0)
+            
+            logger.info(f"Calculated product demand analysis for {len(product_analysis)} products")
+            return product_analysis
+            
+        except Exception as e:
+            logger.error(f"Error calculating product demand from dataframe: {e}")
+            return pd.DataFrame()
 
     def get_customs_clearance_summary(self):
         """Get summary of customs clearance deliveries (EPE + Foreign)"""

@@ -490,65 +490,539 @@ if df is not None and not df.empty:
             st.dataframe(styled_df, use_container_width=True)
     
     with tab4:
-        # Product Analysis tab (NEW)
+        # Product Analysis tab - Focus on unique product insights
         st.subheader("🔍 Product Demand Analysis")
         
-        # Get product demand analysis
-        product_analysis = data_loader.get_product_demand_analysis()
+        # Use the new hybrid method - now filtered!
+        product_analysis = data_loader.get_product_demand_from_dataframe(df)
         
         if not product_analysis.empty:
-            # Show top products with gaps
-            st.markdown("#### Top Products by Demand Gap")
-            gap_products = product_analysis[product_analysis['gap_quantity'] > 0].head(10)
+            # Check data quality issues
+            data_quality_issues = []
+            if 'fulfill_rate' not in product_analysis.columns:
+                data_quality_issues.append("Product fulfillment rate data not available")
+            elif product_analysis['fulfill_rate'].isna().all():
+                data_quality_issues.append("Product fulfillment rate values are missing")
             
-            if not gap_products.empty:
-                fig4 = px.bar(
-                    gap_products,
-                    x='pt_code',
-                    y='gap_quantity',
-                    title='Top 10 Products with Supply Gap',
-                    labels={'gap_quantity': 'Gap Quantity', 'pt_code': 'PT Code'},
-                    color='fulfill_rate',
-                    color_continuous_scale='RdYlGn',
-                    hover_data=['product_pn']
+            if 'gap_quantity' not in product_analysis.columns:
+                data_quality_issues.append("Product gap quantity data not available")
+            elif product_analysis['gap_quantity'].isna().all():
+                data_quality_issues.append("Product gap quantity values are missing")
+                
+            if data_quality_issues:
+                with st.expander("⚠️ Data Quality Notice", expanded=False):
+                    st.warning("Some product-level metrics are missing or incomplete:")
+                    for issue in data_quality_issues:
+                        st.write(f"• {issue}")
+                    st.info("This may be due to missing 'product_fulfill_rate_percent' or 'product_gap_quantity' columns in the source data.")
+            
+            # Display unique metrics not shown in other tabs
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                # Products with multiple delivery points
+                multi_delivery_products = len(product_analysis[product_analysis['active_deliveries'] > 1])
+                st.metric(
+                    "Multi-Delivery Products", 
+                    f"{multi_delivery_products:,}",
+                    help="Products being delivered to multiple locations/orders"
                 )
-                # Add text labels on bars
-                fig4.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
-                st.plotly_chart(fig4, use_container_width=True)
             
-            # Product demand details
-            st.markdown("#### Product Demand Details")
+            with col2:
+                # Products requiring multiple warehouses
+                if 'warehouse_count' in product_analysis.columns:
+                    multi_warehouse_products = len(product_analysis[product_analysis['warehouse_count'] > 1])
+                    st.metric(
+                        "Multi-Warehouse Products", 
+                        f"{multi_warehouse_products:,}",
+                        help="Products that need inventory from multiple warehouses"
+                    )
+                else:
+                    st.metric("Multi-Warehouse Products", "N/A")
             
-            # Define formatting function for fulfillment status color
-            def color_fulfillment_status(val):
-                if val == 'Out of Stock':
-                    return 'background-color: #ffcccb; color: #721c24'
-                elif val == 'Partial Fulfilled':
-                    return 'background-color: #fff3cd; color: #856404'
-                elif val == 'Fulfilled' or val == 'Can Fulfill All':
-                    return 'background-color: #d4edda; color: #155724'
-                return ''
+            with col3:
+                # Critical products (unique metric)
+                if 'gap_quantity' in product_analysis.columns and 'fulfill_rate' in product_analysis.columns:
+                    critical_products = len(product_analysis[
+                        (product_analysis['gap_quantity'] > 0) & 
+                        (product_analysis['fulfill_rate'] < 50)
+                    ])
+                    st.metric(
+                        "Critical Products", 
+                        f"{critical_products:,}",
+                        help="Products with gap > 0 and fulfillment < 50%"
+                    )
+                else:
+                    st.metric("Critical Products", "N/A")
             
-            # Apply styling to product analysis table
-            styled_product_df = product_analysis[['pt_code', 'product_pn', 'active_deliveries', 'total_remaining_demand',
-                                                 'total_inventory', 'gap_quantity', 'fulfill_rate', 
-                                                 'fulfillment_status']].style.format({
-                'total_remaining_demand': '{:,.0f}',
-                'total_inventory': '{:,.0f}',
-                'gap_quantity': '{:,.0f}',
-                'fulfill_rate': '{:.1f}%',
-                'active_deliveries': '{:,.0f}'
-            }, na_rep='-').background_gradient(
-                subset=['fulfill_rate'], 
-                cmap='RdYlGn',
-                vmin=0,
-                vmax=100
-            ).applymap(
-                color_fulfillment_status,
-                subset=['fulfillment_status']
-            )
+            with col4:
+                # Average gap percentage
+                if 'gap_percentage' in product_analysis.columns:
+                    avg_gap_percentage = product_analysis[product_analysis['gap_quantity'] > 0]['gap_percentage'].mean()
+                    st.metric(
+                        "Avg Gap %", 
+                        f"{avg_gap_percentage:.1f}%" if not pd.isna(avg_gap_percentage) else "0%",
+                        help="Average shortage percentage for products with gaps"
+                    )
+                else:
+                    st.metric("Avg Gap %", "N/A")
             
-            st.dataframe(styled_product_df, use_container_width=True)
+            # Product shortage analysis with configurable display
+            st.markdown("#### Product Shortage Analysis")
+            
+            # Help text about sorting options
+            with st.expander("ℹ️ Understanding Sort Options", expanded=False):
+                st.markdown("""
+                - **Gap Quantity (Units)**: Sort by actual number of units short
+                - Use when: Volume matters most (e.g., warehouse space, shipping capacity)
+                - Example: Product A missing 1,000 units > Product B missing 100 units
+                
+                - **Gap Percentage (%)**: Sort by percentage of demand that cannot be fulfilled  
+                - Use when: Service level matters most (e.g., customer satisfaction)
+                - Example: Product B missing 90% (90/100) > Product A missing 10% (1,000/10,000)
+                
+                - **Total Demand (Units)**: Sort by total demand volume
+                - Use when: Focusing on high-volume products
+                """)
+            
+            # Configuration section
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                # Number of products to display
+                num_products = st.number_input(
+                    "Products to display",
+                    min_value=5,
+                    max_value=50,
+                    value=15,
+                    step=1,
+                    help="Number of products to show in the chart"
+                )
+            
+            with col2:
+                # Sort criteria
+                # Only show available sort options
+                available_sort_options = {}
+                if 'gap_quantity' in product_analysis.columns:
+                    available_sort_options['Gap Quantity (Units)'] = 'gap_quantity'
+                if 'gap_percentage' in product_analysis.columns:
+                    available_sort_options['Gap Percentage (%)'] = 'gap_percentage'
+                available_sort_options['Total Demand (Units)'] = 'total_remaining_demand'
+                
+                sort_by = st.selectbox(
+                    "Sort by",
+                    options=list(available_sort_options.keys()),
+                    index=0,
+                    help="Choose how to prioritize products"
+                )
+                sort_column = available_sort_options[sort_by]
+            
+            # Filter and sort data
+            if 'gap_quantity' in product_analysis.columns and sort_column in ['gap_quantity', 'gap_percentage']:
+                # Focus on products with shortage when sorting by gap metrics
+                shortage_products = product_analysis[product_analysis['gap_quantity'] > 0].copy()
+            else:
+                # If no gap data or sorting by demand, show all products
+                shortage_products = product_analysis.copy()
+            
+            if not shortage_products.empty:
+                # Apply sorting
+                if sort_column in shortage_products.columns:
+                    shortage_products = shortage_products.sort_values(sort_column, ascending=False)
+                
+                # Get top N products
+                top_shortage = shortage_products.head(num_products)
+                
+                # Create comprehensive chart
+                if 'gap_quantity' in top_shortage.columns and top_shortage['gap_quantity'].notna().any():
+                    # Main metric is gap quantity
+                    chart_data = top_shortage.copy()
+                    
+                    # Create product label with PT code and PN
+                    chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:30]
+                    
+                    # Determine which metric to display on X-axis based on sort
+                    if sort_column == 'gap_percentage' and 'gap_percentage' in chart_data.columns:
+                        x_column = 'gap_percentage'
+                        x_title = 'Gap Percentage (%)'
+                        text_template = '%{x:.1f}%'
+                    elif sort_column == 'total_remaining_demand':
+                        x_column = 'total_remaining_demand'
+                        x_title = 'Total Remaining Demand'
+                        text_template = '%{x:,.0f}'
+                    else:
+                        x_column = 'gap_quantity'
+                        x_title = 'Gap Quantity'
+                        text_template = '%{x:,.0f}'
+                    
+                    # Build hover template dynamically
+                    hover_parts = [
+                        '<b>%{customdata[0]}</b>',
+                        'Product: %{customdata[1]}'
+                    ]
+                    customdata_cols = ['pt_code', 'product_pn']
+                    
+                    # Always show key metrics
+                    idx = 2
+                    if 'gap_quantity' in chart_data.columns:
+                        hover_parts.append(f'Gap Quantity: %{{customdata[{idx}]:,.0f}}')
+                        customdata_cols.append('gap_quantity')
+                        idx += 1
+                    
+                    hover_parts.append(f'Total Demand: %{{customdata[{idx}]:,.0f}}')
+                    customdata_cols.append('total_remaining_demand')
+                    idx += 1
+                    
+                    # Add optional fields if they exist
+                    if 'fulfill_rate' in chart_data.columns:
+                        hover_parts.append(f'Fulfillment Rate: %{{customdata[{idx}]:.1f}}%')
+                        customdata_cols.append('fulfill_rate')
+                        idx += 1
+                    
+                    if 'gap_percentage' in chart_data.columns:
+                        hover_parts.append(f'Gap %: %{{customdata[{idx}]:.1f}}%')
+                        customdata_cols.append('gap_percentage')
+                        idx += 1
+                    
+                    if 'total_inventory' in chart_data.columns:
+                        hover_parts.append(f'Current Inventory: %{{customdata[{idx}]:,.0f}}')
+                        customdata_cols.append('total_inventory')
+                        idx += 1
+                    
+                    if 'active_deliveries' in chart_data.columns:
+                        hover_parts.append(f'Active Deliveries: %{{customdata[{idx}]}}')
+                        customdata_cols.append('active_deliveries')
+                        idx += 1
+                    
+                    if 'warehouse_count' in chart_data.columns:
+                        hover_parts.append(f'Warehouses: %{{customdata[{idx}]}}')
+                        customdata_cols.append('warehouse_count')
+                    
+                    hover_template = '<br>'.join(hover_parts)
+                    
+                    # Create figure
+                    fig = go.Figure()
+                    
+                    # Add bars
+                    if 'fulfill_rate' in chart_data.columns and chart_data['fulfill_rate'].notna().any():
+                        # Color by fulfillment rate
+                        fig.add_trace(go.Bar(
+                            y=chart_data['product_label'],
+                            x=chart_data[x_column],
+                            orientation='h',
+                            marker=dict(
+                                color=chart_data['fulfill_rate'],
+                                colorscale='RdYlGn',
+                                cmin=0,
+                                cmax=100,
+                                colorbar=dict(
+                                    title='Fulfill<br>Rate %',
+                                    thickness=15,
+                                    len=0.7
+                                )
+                            ),
+                            customdata=chart_data[customdata_cols].values,
+                            hovertemplate=hover_template,
+                            name=''
+                        ))
+                    else:
+                        # Single color if no fulfill rate
+                        fig.add_trace(go.Bar(
+                            y=chart_data['product_label'],
+                            x=chart_data[x_column],
+                            orientation='h',
+                            marker_color='#ff6b6b',
+                            customdata=chart_data[customdata_cols].values,
+                            hovertemplate=hover_template,
+                            name=''
+                        ))
+                    
+                    # Update layout
+                    sort_display = {
+                        'gap_quantity': 'Gap Quantity',
+                        'gap_percentage': 'Gap Percentage', 
+                        'total_remaining_demand': 'Total Demand'
+                    }.get(sort_column, 'Shortage')
+                    
+                    fig.update_layout(
+                        title=f'Top {len(top_shortage)} Products by {sort_display}',
+                        xaxis_title=x_title,
+                        yaxis_title='',
+                        height=max(400, len(top_shortage) * 40),  # Dynamic height
+                        showlegend=False,
+                        margin=dict(l=200),  # More space for product labels
+                        plot_bgcolor='white',
+                        xaxis=dict(
+                            gridcolor='lightgray',
+                            showgrid=True,
+                            zeroline=True,
+                            zerolinecolor='gray'
+                        ),
+                        yaxis=dict(
+                            tickmode='linear',
+                            autorange='reversed'  # Top product at top
+                        )
+                    )
+                    
+                    # Add value labels on bars
+                    fig.update_traces(
+                        texttemplate=text_template,
+                        textposition='outside'
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Summary statistics below chart
+                    with st.expander("📊 Summary Statistics", expanded=False):
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            total_gap = top_shortage['gap_quantity'].sum()
+                            st.metric("Total Gap (Top Products)", f"{total_gap:,.0f}")
+                        
+                        with col2:
+                            total_demand = top_shortage['total_remaining_demand'].sum()
+                            st.metric("Total Demand (Top Products)", f"{total_demand:,.0f}")
+                        
+                        with col3:
+                            if 'fulfill_rate' in top_shortage.columns:
+                                avg_fulfill = top_shortage['fulfill_rate'].mean()
+                                st.metric("Avg Fulfillment Rate", f"{avg_fulfill:.1f}%")
+                            else:
+                                st.metric("Avg Fulfillment Rate", "N/A")
+                        
+                        with col4:
+                            if 'gap_percentage' in top_shortage.columns:
+                                avg_gap_pct = top_shortage['gap_percentage'].mean()
+                                st.metric("Avg Gap %", f"{avg_gap_pct:.1f}%")
+                            else:
+                                st.metric("Avg Gap %", "N/A")
+                else:
+                    # Fallback to demand-based chart if no gap data
+                    st.info("Gap quantity data not available. Showing products by total demand.")
+                    
+                    chart_data = top_shortage.copy()
+                    chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:30]
+                    
+                    # Build dynamic hover template
+                    hover_parts = [
+                        '<b>%{customdata[0]}</b>',
+                        'Product: %{customdata[1]}',
+                        'Total Demand: %{x:,.0f}'
+                    ]
+                    customdata_cols = ['pt_code', 'product_pn']
+                    
+                    idx = 2
+                    if 'active_deliveries' in chart_data.columns:
+                        hover_parts.append(f'Active Deliveries: %{{customdata[{idx}]}}')
+                        customdata_cols.append('active_deliveries')
+                        idx += 1
+                    
+                    if 'warehouse_count' in chart_data.columns:
+                        hover_parts.append(f'Warehouses: %{{customdata[{idx}]}}')
+                        customdata_cols.append('warehouse_count')
+                        idx += 1
+                    
+                    if 'total_inventory' in chart_data.columns:
+                        hover_parts.append(f'Current Inventory: %{{customdata[{idx}]:,.0f}}')
+                        customdata_cols.append('total_inventory')
+                    
+                    fig = go.Figure(go.Bar(
+                        y=chart_data['product_label'],
+                        x=chart_data['total_remaining_demand'],
+                        orientation='h',
+                        marker_color='#3498db',
+                        text=chart_data['total_remaining_demand'],
+                        texttemplate='%{text:,.0f}',
+                        textposition='outside',
+                        hovertemplate='<br>'.join(hover_parts),
+                        customdata=chart_data[customdata_cols].values,
+                        name=''
+                    ))
+                    
+                    fig.update_layout(
+                        title=f'Top {len(top_shortage)} Products by Total Demand',
+                        xaxis_title='Total Remaining Demand',
+                        yaxis_title='',
+                        height=max(400, len(top_shortage) * 40),
+                        showlegend=False,
+                        margin=dict(l=200),
+                        plot_bgcolor='white',
+                        xaxis=dict(
+                            gridcolor='lightgray',
+                            showgrid=True,
+                            zeroline=True,
+                            zerolinecolor='gray'
+                        ),
+                        yaxis=dict(
+                            tickmode='linear',
+                            autorange='reversed'
+                        )
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                if 'gap_quantity' in product_analysis.columns:
+                    st.success("✅ No products with shortage found in the filtered data!")
+                else:
+                    st.info("No product data available for analysis")
+            
+            # Product detail table
+            st.markdown("#### Product Detail Table")
+            
+            # Filter options for the table
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                show_critical_only = st.checkbox("Show critical products only", value=False)
+            with col2:
+                show_gaps_only = st.checkbox("Show products with gaps only", value=False)
+            with col3:
+                min_deliveries = st.number_input("Min active deliveries", min_value=0, value=0)
+            
+            # Apply table filters
+            table_data = product_analysis.copy()
+            if show_critical_only and 'gap_quantity' in table_data.columns and 'fulfill_rate' in table_data.columns:
+                table_data = table_data[(table_data['gap_quantity'] > 0) & (table_data['fulfill_rate'] < 50)]
+            if show_gaps_only and 'gap_quantity' in table_data.columns:
+                table_data = table_data[table_data['gap_quantity'] > 0]
+            if min_deliveries > 0:
+                table_data = table_data[table_data['active_deliveries'] >= min_deliveries]
+            
+            if not table_data.empty:
+                # Select columns for display - dynamically build based on available columns
+                possible_columns = [
+                    'pt_code', 'product_pn', 'active_deliveries', 'unique_orders',
+                    'total_remaining_demand', 'total_inventory', 'preferred_warehouse_inventory',
+                    'gap_quantity', 'gap_percentage', 'fulfill_rate', 
+                    'fulfillment_status', 'warehouse_count', 'avg_demand_percentage'
+                ]
+                
+                # Default columns - only include those that exist
+                default_columns = [
+                    'pt_code', 'product_pn', 'active_deliveries', 
+                    'total_remaining_demand', 'total_inventory',
+                    'gap_quantity', 'gap_percentage', 'fulfill_rate', 
+                    'fulfillment_status', 'warehouse_count'
+                ]
+                
+                display_columns = [col for col in default_columns if col in table_data.columns]
+                
+                available_columns = [col for col in display_columns if col in table_data.columns]
+                
+                # Enhanced styling function
+                def style_product_table(df):
+                    # Apply styling
+                    format_spec = {}
+                    # Build format dict based on available columns
+                    if 'total_remaining_demand' in available_columns:
+                        format_spec['total_remaining_demand'] = '{:,.0f}'
+                    if 'total_inventory' in available_columns:
+                        format_spec['total_inventory'] = '{:,.0f}'
+                    if 'preferred_warehouse_inventory' in available_columns:
+                        format_spec['preferred_warehouse_inventory'] = '{:,.0f}'
+                    if 'gap_quantity' in available_columns:
+                        format_spec['gap_quantity'] = '{:,.0f}'
+                    if 'gap_percentage' in available_columns:
+                        format_spec['gap_percentage'] = '{:.1f}%'
+                    if 'fulfill_rate' in available_columns:
+                        format_spec['fulfill_rate'] = '{:.1f}%'
+                    if 'active_deliveries' in available_columns:
+                        format_spec['active_deliveries'] = '{:,}'
+                    if 'unique_orders' in available_columns:
+                        format_spec['unique_orders'] = '{:,}'
+                    if 'warehouse_count' in available_columns:
+                        format_spec['warehouse_count'] = '{:,}'
+                    if 'avg_demand_percentage' in available_columns:
+                        format_spec['avg_demand_percentage'] = '{:.1f}%'
+                    
+                    styled = df[available_columns].style.format(format_spec, na_rep='-')
+                    
+                    # Apply gradient to fulfill_rate - FIXED: Red at 0%
+                    if 'fulfill_rate' in available_columns:
+                        styled = styled.background_gradient(
+                            subset=['fulfill_rate'], 
+                            cmap='RdYlGn',
+                            vmin=0,
+                            vmax=100
+                        )
+                    
+                    # Conditional formatting for fulfillment status
+                    def color_fulfillment_status(val):
+                        if val == 'Out of Stock':
+                            return 'background-color: #ffcccb; color: #721c24; font-weight: bold'
+                        elif val == 'Can Fulfill Partial':
+                            return 'background-color: #fff3cd; color: #856404'
+                        elif val in ['Can Fulfill All', 'Fulfilled', 'Ready to Ship']:
+                            return 'background-color: #d4edda; color: #155724'
+                        return ''
+                    
+                    if 'fulfillment_status' in available_columns:
+                        styled = styled.applymap(
+                            color_fulfillment_status,
+                            subset=['fulfillment_status']
+                        )
+                    
+                    # Highlight critical products
+                    def highlight_critical(s):
+                        if 'gap_quantity' in s.index and 'fulfill_rate' in s.index:
+                            if s['gap_quantity'] > 0 and s['fulfill_rate'] < 50:
+                                return ['border-left: 4px solid #dc3545; font-weight: bold' if col == 'pt_code' 
+                                    else '' for col in s.index]
+                        return [''] * len(s)
+                    
+                    styled = styled.apply(highlight_critical, axis=1)
+                    
+                    return styled
+                
+                # Display table with styling
+                st.dataframe(
+                    style_product_table(table_data),
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # Summary below table
+                st.caption(f"Showing {len(table_data)} of {len(product_analysis)} products")
+                
+                # Export functionality
+                csv = table_data[available_columns].to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Export Filtered Product Data",
+                    data=csv,
+                    file_name=f"product_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime='text/csv'
+                )
+            else:
+                st.info("No products match the selected criteria")
+            
+            # Top customers analysis for critical products
+            if show_critical_only and not table_data.empty and 'top_customers' in table_data.columns:
+                with st.expander("🎯 Top Customers for Critical Products", expanded=False):
+                    # Build columns list dynamically
+                    customer_columns = ['pt_code', 'product_pn']
+                    if 'gap_quantity' in table_data.columns:
+                        customer_columns.append('gap_quantity')
+                    if 'fulfill_rate' in table_data.columns:
+                        customer_columns.append('fulfill_rate')
+                    customer_columns.append('top_customers')
+                    
+                    # Filter for available columns
+                    available_customer_cols = [col for col in customer_columns if col in table_data.columns]
+                    customer_data = table_data[available_customer_cols].head(10)
+                    
+                    # Build format dict
+                    format_dict = {}
+                    if 'gap_quantity' in customer_data.columns:
+                        format_dict['gap_quantity'] = '{:,.0f}'
+                    if 'fulfill_rate' in customer_data.columns:
+                        format_dict['fulfill_rate'] = '{:.1f}%'
+                    
+                    st.dataframe(
+                        customer_data.style.format(format_dict),
+                        use_container_width=True
+                    )
+        else:
+            st.info("No product data available for the selected filters")
+
 else:
     st.info("No delivery data found for the selected filters")
 
