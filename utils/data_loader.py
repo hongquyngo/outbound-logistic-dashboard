@@ -124,6 +124,12 @@ class DeliveryDataLoader:
             params = {}
             
             if filters:
+                if filters.get('products'):
+                    # Extract pt_codes từ các product display đã chọn
+                    pt_codes = [p.split(' - ')[0] for p in filters['products']]
+                    query += " AND pt_code IN :pt_codes"
+                    params['pt_codes'] = tuple(pt_codes)
+                    
                 if filters.get('date_from'):
                     query += " AND etd >= :date_from"
                     params['date_from'] = filters['date_from']
@@ -205,7 +211,16 @@ class DeliveryDataLoader:
                 'countries': "SELECT DISTINCT recipient_country_name FROM delivery_full_view WHERE recipient_country_name IS NOT NULL ORDER BY recipient_country_name",
                 'statuses': "SELECT DISTINCT shipment_status FROM delivery_full_view WHERE shipment_status IS NOT NULL ORDER BY shipment_status",
                 'timeline_statuses': "SELECT DISTINCT delivery_timeline_status FROM delivery_full_view WHERE delivery_timeline_status IS NOT NULL ORDER BY delivery_timeline_status",
-                'legal_entities': "SELECT DISTINCT legal_entity FROM delivery_full_view WHERE legal_entity IS NOT NULL ORDER BY legal_entity"
+                'legal_entities': "SELECT DISTINCT legal_entity FROM delivery_full_view WHERE legal_entity IS NOT NULL ORDER BY legal_entity",
+                # Product query - sử dụng CONCAT trực tiếp
+                'products': """
+                    SELECT DISTINCT 
+                        CONCAT(pt_code, ' - ', product_pn) as product_display
+                    FROM delivery_full_view 
+                    WHERE pt_code IS NOT NULL 
+                        AND product_pn IS NOT NULL
+                    ORDER BY pt_code
+                """
             }
             
             options = {}

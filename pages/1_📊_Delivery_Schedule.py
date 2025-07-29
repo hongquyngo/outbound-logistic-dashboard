@@ -57,7 +57,7 @@ with st.expander("🔍 Filters", expanded=True):
             max_value=max_date,
             help=f"Available data from {min_date} to {max_date}"
         )
-        
+
         # Legal Entity filter
         selected_legal_entities = st.multiselect(
             "Legal Entity",
@@ -66,7 +66,7 @@ with st.expander("🔍 Filters", expanded=True):
             placeholder="All legal entities",
             help="Filter by selling company/legal entity"
         )
-    
+
     with col2:
         # Creator filter
         selected_creators = st.multiselect(
@@ -115,24 +115,44 @@ with st.expander("🔍 Filters", expanded=True):
     col4, col5, col6 = st.columns(3)
 
     with col4:
-        # EPE Company filter - NOW DYNAMIC
-        epe_options = filter_options.get('epe_options', ["All"])
-        epe_filter = st.selectbox(
-            "EPE Company Filter",
-            options=epe_options,
-            index=0,
-            help="Filter by EPE company type. EPE companies are a specific customer category."
-        )
+        col4_1, col4_2 = st.columns(2)
+        with col4_1:
+            # EPE Company filter - NOW DYNAMIC
+            epe_options = filter_options.get('epe_options', ["All"])
+            epe_filter = st.selectbox(
+                "EPE Company Filter",
+                options=epe_options,
+                index=0,
+                help="Filter by EPE company type. EPE companies are a specific customer category."
+            )
+
+        with col4_2:
+            # Foreign customer filter - NOW DYNAMIC
+            foreign_options = filter_options.get('foreign_options', ["All Customers"])
+            foreign_filter = st.selectbox(
+                "Customer Type",
+                options=foreign_options,
+                index=0,
+                help="Filter by customer location. Domestic = same country as seller, Foreign = different country."
+            )
 
     with col5:
-        # Foreign customer filter - NOW DYNAMIC
-        foreign_options = filter_options.get('foreign_options', ["All Customers"])
-        foreign_filter = st.selectbox(
-            "Customer Type",
-            options=foreign_options,
-            index=0,
-            help="Filter by customer location. Domestic = same country as seller, Foreign = different country."
+        # Product filter - NOW DYNAMIC
+        product_options = filter_options.get('products', [])
+        selected_products = st.multiselect(
+            "Product",
+            options=product_options,
+            default=None,
+            placeholder="All products",
+            help="Filter by product PT Code or Product PN"
         )
+        
+        # If products are selected, extract pt_codes
+        if selected_products:
+            pt_codes = [p.split(' - ')[0] for p in selected_products]
+            st.session_state.selected_pt_codes = pt_codes
+        else:
+            st.session_state.selected_pt_codes = None
 
     with col6:
         # Timeline status filter
@@ -154,6 +174,7 @@ filters = {
     'date_to': date_range[1] if len(date_range) >= 2 else date_range[0],
     'creators': selected_creators if selected_creators else None,
     'customers': selected_customers if selected_customers else None,
+    'products': selected_products if selected_products else None,
     'ship_to_companies': selected_ship_to if selected_ship_to else None,
     'states': selected_states if selected_states else None,
     'countries': selected_countries if selected_countries else None,
