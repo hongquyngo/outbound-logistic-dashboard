@@ -29,7 +29,7 @@ class EmailSender:
         # Log configuration
         logger.info(f"Email sender initialized with: {self.sender_email} via {self.smtp_host}:{self.smtp_port}")
     
-    def create_overdue_alerts_html(self, delivery_df, sales_name):
+    def create_overdue_alerts_html(self, delivery_df, sales_name, contact_name=None):
         """Create HTML content for overdue alerts email"""
         
         # Ensure delivery_date is datetime
@@ -48,6 +48,12 @@ class EmailSender:
         out_of_stock_products = 0
         if 'product_fulfillment_status' in delivery_df.columns and 'product_id' in delivery_df.columns:
             out_of_stock_products = delivery_df[delivery_df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
+        
+        # Determine greeting
+        if contact_name and contact_name != 'Unknown Contact':
+            greeting = f"Dear {contact_name},"
+        else:
+            greeting = f"Dear {sales_name},"
         
         # Start HTML
         html = f"""
@@ -157,7 +163,7 @@ class EmailSender:
             </div>
             
             <div class="content">
-                <p>Dear {sales_name},</p>
+                <p>{greeting}</p>
                 
                 <div class="alert-box">
                     <strong>⚠️ CRITICAL ALERT:</strong> You have deliveries that require immediate attention. 
@@ -295,7 +301,7 @@ class EmailSender:
         
         return html
     
-    def create_delivery_schedule_html(self, delivery_df, recipient_name, weeks_ahead=4):
+    def create_delivery_schedule_html(self, delivery_df, recipient_name, weeks_ahead=4, contact_name=None):
         """Create HTML content for delivery schedule email with DN Number and Province"""
         
         # Ensure delivery_date is datetime
@@ -320,6 +326,12 @@ class EmailSender:
         
         # Format weeks text
         week_text = f"{weeks_ahead} Week" if weeks_ahead == 1 else f"{weeks_ahead} Weeks"
+        
+        # Determine the greeting based on whether we have a contact name
+        if contact_name and contact_name != 'Unknown Contact':
+            greeting = f"Dear {contact_name},"
+        else:
+            greeting = f"Dear {recipient_name},"
         
         # Start HTML
         html = f"""
@@ -417,7 +429,7 @@ class EmailSender:
             </div>
             
             <div class="content">
-                <p>Dear {recipient_name},</p>
+                <p>{greeting}</p>
                 <p>Please find below your upcoming delivery schedule for the next {weeks_ahead} week{'s' if weeks_ahead != 1 else ''}. 
                 Make sure to coordinate with customers for smooth delivery operations.</p>
                 
@@ -564,7 +576,7 @@ class EmailSender:
 
     def send_delivery_schedule_email(self, recipient_email, recipient_name, delivery_df, 
                                 cc_emails=None, notification_type="📅 Delivery Schedule", 
-                                weeks_ahead=4):
+                                weeks_ahead=4, contact_name=None):
         """Send delivery schedule email with enhanced content"""
         try:
             # Check email configuration
@@ -582,11 +594,19 @@ class EmailSender:
             if notification_type == "🚨 Overdue Alerts":
                 overdue_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
                 due_today_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Due Today']['delivery_id'].nunique()
-                msg['Subject'] = f"🚨 URGENT: {overdue_count} Overdue & {due_today_count} Due Today Deliveries - {recipient_name}"
+                # Include contact name in urgent subject if available
+                if contact_name and contact_name != 'Unknown Contact':
+                    msg['Subject'] = f"🚨 URGENT: {overdue_count} Overdue & {due_today_count} Due Today Deliveries - {recipient_name} (Attn: {contact_name})"
+                else:
+                    msg['Subject'] = f"🚨 URGENT: {overdue_count} Overdue & {due_today_count} Due Today Deliveries - {recipient_name}"
             else:
                 # Dynamic subject with weeks_ahead
                 week_text = f"{weeks_ahead} Week" if weeks_ahead == 1 else f"{weeks_ahead} Weeks"
-                msg['Subject'] = f"Delivery Schedule - Next {week_text} - {recipient_name}"
+                # Include contact name in subject if available
+                if contact_name and contact_name != 'Unknown Contact':
+                    msg['Subject'] = f"Delivery Schedule - Next {week_text} - {recipient_name} (Attn: {contact_name})"
+                else:
+                    msg['Subject'] = f"Delivery Schedule - Next {week_text} - {recipient_name}"
             
             msg['From'] = self.sender_email
             msg['To'] = recipient_email
@@ -596,9 +616,9 @@ class EmailSender:
             
             # Create HTML content based on notification type
             if notification_type == "🚨 Overdue Alerts":
-                html_content = self.create_overdue_alerts_html(delivery_df, recipient_name)
+                html_content = self.create_overdue_alerts_html(delivery_df, recipient_name, contact_name)
             else:
-                html_content = self.create_delivery_schedule_html(delivery_df, recipient_name, weeks_ahead)
+                html_content = self.create_delivery_schedule_html(delivery_df, recipient_name, weeks_ahead, contact_name)
             
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
@@ -611,9 +631,18 @@ class EmailSender:
             
             # Set filename based on notification type and recipient
             if notification_type == "🚨 Overdue Alerts":
-                filename = f"urgent_deliveries_{recipient_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                if contact_name and contact_name != 'Unknown Contact':
+                    filename = f"urgent_deliveries_{recipient_name}_{contact_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                else:
+                    filename = f"urgent_deliveries_{recipient_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
             else:
-                filename = f"delivery_schedule_{recipient_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                if contact_name and contact_name != 'Unknown Contact':
+                    filename = f"delivery_schedule_{recipient_name}_{contact_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                else:
+                    filename = f"delivery_schedule_{recipient_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            
+            # Clean filename
+            filename = filename.replace(' ', '_').replace('/', '_').replace('\\', '_')
             
             excel_part.add_header(
                 'Content-Disposition',
@@ -631,9 +660,18 @@ class EmailSender:
                         ics_part = MIMEBase('text', 'calendar')
                         ics_part.set_payload(ics_content.encode('utf-8'))
                         encoders.encode_base64(ics_part)
+                        
+                        # Include contact name in calendar filename if available
+                        if contact_name and contact_name != 'Unknown Contact':
+                            cal_filename = f"delivery_schedule_{recipient_name}_{contact_name}_{datetime.now().strftime('%Y%m%d')}.ics"
+                        else:
+                            cal_filename = f"delivery_schedule_{recipient_name}_{datetime.now().strftime('%Y%m%d')}.ics"
+                        
+                        cal_filename = cal_filename.replace(' ', '_').replace('/', '_').replace('\\', '_')
+                        
                         ics_part.add_header(
                             'Content-Disposition',
-                            f'attachment; filename="delivery_schedule_{recipient_name.replace(" ", "_")}_{datetime.now().strftime("%Y%m%d")}.ics"'
+                            f'attachment; filename="{cal_filename}"'
                         )
                         msg.attach(ics_part)
                 except Exception as e:

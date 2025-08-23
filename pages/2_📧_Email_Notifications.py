@@ -86,28 +86,25 @@ def get_sales_list(weeks_ahead=4):
 
 # Get customers with active deliveries
 @st.cache_data(ttl=300)
-def get_customers_list(weeks_ahead=4):
+def get_customers_with_deliveries(weeks_ahead=4):
     """Get list of customers with active deliveries"""
     try:
         query = text("""
         SELECT DISTINCT 
             d.customer,
             d.customer_code,
-            MIN(d.customer_contact_email) as customer_email,
             COUNT(DISTINCT d.delivery_id) as active_deliveries,
             SUM(d.remaining_quantity_to_deliver) as total_quantity,
             COUNT(DISTINCT d.created_by_name) as sales_count,
+            COUNT(DISTINCT d.recipient_state_province) as provinces_count,
             GROUP_CONCAT(DISTINCT d.recipient_state_province) as provinces
         FROM delivery_full_view d
         WHERE d.etd >= CURDATE()
             AND d.etd <= DATE_ADD(CURDATE(), INTERVAL :weeks WEEK)
             AND d.remaining_quantity_to_deliver > 0
             AND d.shipment_status NOT IN ('DELIVERED', 'COMPLETED')
-            AND d.customer_contact_email IS NOT NULL
-            AND d.customer_contact_email != ''
         GROUP BY d.customer, d.customer_code
-        HAVING customer_email IS NOT NULL
-        ORDER BY customer
+        ORDER BY d.customer
         """)
         
         engine = data_loader.engine
@@ -117,6 +114,45 @@ def get_customers_list(weeks_ahead=4):
     except Exception as e:
         logger.error(f"Error loading customers list: {e}")
         st.error(f"Error loading customers list: {e}")
+        return pd.DataFrame()
+
+# Get customer contacts
+@st.cache_data(ttl=300)
+def get_customer_contacts(customer_names):
+    """Get contacts for selected customers"""
+    try:
+        if not customer_names:
+            return pd.DataFrame()
+            
+        query = text("""
+        SELECT DISTINCT
+            CONCAT(d.customer, '_', COALESCE(d.customer_contact_email, 'no_email'), '_', COALESCE(d.customer_contact, 'Unknown')) as contact_id,
+            d.customer,
+            d.customer_code,
+            COALESCE(d.customer_contact, 'Unknown Contact') as contact_name,
+            d.customer_contact_email as email,
+            d.customer_contact_phone as phone,
+            COUNT(DISTINCT d.delivery_id) as delivery_count,
+            SUM(d.remaining_quantity_to_deliver) as total_quantity
+        FROM delivery_full_view d
+        WHERE d.customer IN :customers
+            AND d.etd >= CURDATE()
+            AND d.etd <= DATE_ADD(CURDATE(), INTERVAL 4 WEEK)
+            AND d.remaining_quantity_to_deliver > 0
+            AND d.shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+            AND d.customer_contact_email IS NOT NULL
+            AND d.customer_contact_email != ''
+        GROUP BY d.customer, d.customer_code, d.customer_contact, d.customer_contact_email, d.customer_contact_phone
+        ORDER BY d.customer, d.customer_contact
+        """)
+        
+        engine = data_loader.engine
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn, params={'customers': tuple(customer_names)})
+        return df
+    except Exception as e:
+        logger.error(f"Error loading customer contacts: {e}")
+        st.error(f"Error loading customer contacts: {e}")
         return pd.DataFrame()
 
 # Get sales list for overdue alerts
@@ -164,6 +200,10 @@ if 'recipient_type' not in st.session_state:
     st.session_state.recipient_type = 'creators'
 if 'weeks_ahead' not in st.session_state:
     st.session_state.weeks_ahead = 4
+if 'selected_customers' not in st.session_state:
+    st.session_state.selected_customers = []
+if 'selected_customer_contacts' not in st.session_state:
+    st.session_state.selected_customer_contacts = []
 
 # Email configuration section
 col1, col2 = st.columns([2, 1])
@@ -215,7 +255,7 @@ with col1:
     
     # Initialize variables
     selected_recipients = []
-    selected_customers = []
+    selected_customer_contacts = []
     custom_recipients = []
     
     # Special handling for Custom Clearance
@@ -255,6 +295,8 @@ with col1:
         # Update session state
         if recipient_type != st.session_state.recipient_type:
             st.session_state.recipient_type = recipient_type
+            st.session_state.selected_customers = []
+            st.session_state.selected_customer_contacts = []
             st.rerun()
         
         # Handle different recipient types
@@ -303,31 +345,77 @@ with col1:
                     st.warning("No sales with active deliveries found")
         
         elif recipient_type == "customers":
-            # Get customers list
-            customers_df = get_customers_list(weeks_ahead)
+            # Load customers with active deliveries
+            customers_df = get_customers_with_deliveries(weeks_ahead)
             
             if not customers_df.empty:
-                def format_customer(x):
-                    customer = customers_df[customers_df['customer']==x].iloc[0]
-                    return f"{x} ({customer['active_deliveries']} deliveries, {customer['total_quantity']:.0f} units)"
+                # First step: Select customers
+                customer_names = customers_df['customer'].unique().tolist()
                 
-                selected_customers = st.multiselect(
+                def format_customer(customer_name):
+                    customer_info = customers_df[customers_df['customer'] == customer_name].iloc[0]
+                    return f"{customer_name} ({customer_info['active_deliveries']} deliveries, {customer_info['total_quantity']:.0f} units)"
+                
+                selected_customer_names = st.multiselect(
                     "Select customers:",
-                    options=customers_df['customer'].tolist(),
-                    default=None,
-                    format_func=format_customer
+                    options=customer_names,
+                    default=st.session_state.selected_customers,
+                    format_func=format_customer,
+                    key="customer_select"
                 )
                 
-                # Show selected customers summary
-                if selected_customers:
-                    selected_df = customers_df[customers_df['customer'].isin(selected_customers)]
-                    display_df = selected_df[['customer', 'customer_email', 'active_deliveries', 'total_quantity', 'provinces']]
-                    display_df['total_quantity'] = display_df['total_quantity'].apply(lambda x: f"{x:,.0f}")
-                    display_df.columns = ['Customer', 'Email', 'Deliveries', 'Quantity', 'Provinces']
+                # Update session state
+                if selected_customer_names != st.session_state.selected_customers:
+                    st.session_state.selected_customers = selected_customer_names
+                    st.session_state.selected_customer_contacts = []
+                
+                # Second step: Select contacts for selected customers
+                if selected_customer_names:
+                    # Get all contacts for selected customers
+                    selected_customers_df = customers_df[customers_df['customer'].isin(selected_customer_names)]
                     
-                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    # Display customer summary
+                    customer_summary = selected_customers_df[['customer', 'active_deliveries', 'total_quantity', 'provinces_count']]
+                    customer_summary = customer_summary.copy()
+                    customer_summary['total_quantity'] = customer_summary['total_quantity'].apply(lambda x: f"{x:,.0f}")
+                    customer_summary.columns = ['Customer', 'Active Deliveries', 'Total Quantity', 'Provinces']
+                    
+                    st.markdown("#### Selected Customers Summary")
+                    st.dataframe(customer_summary, use_container_width=True, hide_index=True)
+                    
+                    # Get customer contacts
+                    customer_contacts = get_customer_contacts(selected_customer_names)
+                    
+                    if not customer_contacts.empty:
+                        # Format contacts for display
+                        def format_contact(contact_id):
+                            contact = customer_contacts[customer_contacts['contact_id'] == contact_id].iloc[0]
+                            return f"{contact['contact_name']} - {contact['customer']} ({contact['email']})"
+                        
+                        selected_contact_ids = st.multiselect(
+                            "Select customer contacts to send to:",
+                            options=customer_contacts['contact_id'].tolist(),
+                            default=[c['contact_id'] for c in st.session_state.selected_customer_contacts],
+                            format_func=format_contact,
+                            key="customer_contact_select"
+                        )
+                        
+                        # Update selected contacts in session state
+                        if selected_contact_ids:
+                            selected_customer_contacts = customer_contacts[customer_contacts['contact_id'].isin(selected_contact_ids)].to_dict('records')
+                            st.session_state.selected_customer_contacts = selected_customer_contacts
+                            
+                            # Display selected contacts
+                            st.markdown("#### Selected Contacts")
+                            contact_display_df = pd.DataFrame(selected_customer_contacts)[['customer', 'contact_name', 'email']]
+                            contact_display_df.columns = ['Customer', 'Contact Name', 'Email']
+                            st.dataframe(contact_display_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("No contacts found for selected customers. Please check customer contact email in the system.")
+                else:
+                    st.info("Please select customers to see available contacts")
             else:
-                st.warning("No customers with active deliveries and valid email found")
+                st.warning("No customers with active deliveries found")
         
         else:  # custom recipients
             st.markdown("#### Enter Custom Recipients")
@@ -424,7 +512,7 @@ if notification_type == "🛃 Custom Clearance":
     show_preview = True
 elif recipient_type == "creators" and selected_recipients:
     show_preview = True
-elif recipient_type == "customers" and selected_customers:
+elif recipient_type == "customers" and st.session_state.selected_customer_contacts:
     show_preview = True
 elif recipient_type == "custom" and custom_recipients:
     show_preview = True
@@ -459,12 +547,12 @@ if show_preview and st.button("👁️ Preview Email Content", type="secondary")
                 else:
                     st.warning("No customs clearance deliveries found")
             
-            elif recipient_type == "customers" and selected_customers:
-                # Customer preview - show first customer
-                customer_name = selected_customers[0]
-                customer_info = customers_df[customers_df['customer'] == customer_name].iloc[0]
+            elif recipient_type == "customers" and st.session_state.selected_customer_contacts:
+                # Customer preview - show first customer contact
+                contact = st.session_state.selected_customer_contacts[0]
+                customer_name = contact['customer']
                 
-                st.subheader(f"📧 Preview for {customer_name}")
+                st.subheader(f"📧 Preview for {customer_name} - {contact['contact_name']}")
                 
                 # Get deliveries for this customer
                 preview_df = data_loader.get_customer_deliveries(customer_name, weeks_ahead)
@@ -560,7 +648,7 @@ if notification_type == "🛃 Custom Clearance":
     ready_to_send = True
 elif recipient_type == "creators" and selected_recipients:
     ready_to_send = True
-elif recipient_type == "customers" and selected_customers:
+elif recipient_type == "customers" and st.session_state.selected_customer_contacts:
     ready_to_send = True
 elif recipient_type == "custom" and custom_recipients:
     ready_to_send = True
@@ -576,14 +664,16 @@ if ready_to_send and schedule_type == "Send Now":
         if recipient_type == "creators":
             st.warning(f"⚠️ You are about to send URGENT ALERT emails to {len(selected_recipients)} sales people")
         elif recipient_type == "customers":
-            st.warning(f"⚠️ You are about to send URGENT ALERT emails to {len(selected_customers)} customers")
+            num_contacts = len(st.session_state.selected_customer_contacts)
+            st.warning(f"⚠️ You are about to send URGENT ALERT emails to {num_contacts} customer contacts")
         else:
             st.warning(f"⚠️ You are about to send URGENT ALERT emails to {len(custom_recipients)} custom recipients")
     else:
         if recipient_type == "creators":
             st.warning(f"⚠️ You are about to send delivery schedule emails to {len(selected_recipients)} sales people")
         elif recipient_type == "customers":
-            st.warning(f"⚠️ You are about to send delivery schedule emails to {len(selected_customers)} customers")
+            num_contacts = len(st.session_state.selected_customer_contacts)
+            st.warning(f"⚠️ You are about to send delivery schedule emails to {num_contacts} customer contacts")
         else:
             st.warning(f"⚠️ You are about to send delivery schedule emails to {len(custom_recipients)} custom recipients")
     
@@ -631,31 +721,38 @@ if ready_to_send and schedule_type == "Send Now":
                 progress_bar.progress(1.0)
             
             elif recipient_type == "customers":
-                # Send to customers
-                total_customers = len(selected_customers)
+                # Send to customer contacts (new 2-step logic)
+                customer_contacts = st.session_state.selected_customer_contacts
+                total_contacts = len(customer_contacts)
                 
-                for idx, customer_name in enumerate(selected_customers):
-                    progress = (idx + 1) / total_customers
+                for idx, contact in enumerate(customer_contacts):
+                    progress = (idx + 1) / total_contacts
                     progress_bar.progress(progress)
-                    status_text.text(f"Sending to {customer_name}... ({idx+1}/{total_customers})")
+                    
+                    customer_name = contact['customer']
+                    customer_email = contact['email']
+                    contact_name = contact['contact_name']
+                    
+                    status_text.text(f"Sending to {contact_name} at {customer_name}... ({idx+1}/{total_contacts})")
                     
                     try:
-                        customer_info = customers_df[customers_df['customer'] == customer_name].iloc[0]
                         delivery_df = data_loader.get_customer_deliveries(customer_name, weeks_ahead)
                         
                         if not delivery_df.empty:
                             success, message = email_sender.send_delivery_schedule_email(
-                                customer_info['customer_email'],
+                                customer_email,
                                 customer_name,
                                 delivery_df,
                                 cc_emails=cc_emails if cc_emails else None,
                                 notification_type=notification_type,
-                                weeks_ahead=weeks_ahead  # Add weeks_ahead parameter
+                                weeks_ahead=weeks_ahead,
+                                contact_name=contact_name  # Add contact name for personalization
                             )
                             
                             results.append({
                                 'Customer': customer_name,
-                                'Email': customer_info['customer_email'],
+                                'Contact': contact_name,
+                                'Email': customer_email,
                                 'Status': '✅ Success' if success else '❌ Failed',
                                 'Deliveries': delivery_df['delivery_id'].nunique(),
                                 'Message': message
@@ -663,17 +760,19 @@ if ready_to_send and schedule_type == "Send Now":
                         else:
                             results.append({
                                 'Customer': customer_name,
-                                'Email': customer_info['customer_email'],
+                                'Contact': contact_name,
+                                'Email': customer_email,
                                 'Status': '⚠️ Skipped',
                                 'Deliveries': 0,
                                 'Message': 'No deliveries found'
                             })
                             
                     except Exception as e:
-                        errors.append(f"Error for {customer_name}: {str(e)}")
+                        errors.append(f"Error for {contact_name} at {customer_name}: {str(e)}")
                         results.append({
                             'Customer': customer_name,
-                            'Email': 'N/A',
+                            'Contact': contact_name,
+                            'Email': customer_email,
                             'Status': '❌ Error',
                             'Deliveries': 0,
                             'Message': str(e)
@@ -703,7 +802,7 @@ if ready_to_send and schedule_type == "Send Now":
                                 delivery_df,
                                 cc_emails=cc_emails if cc_emails else None,
                                 notification_type=notification_type,
-                                weeks_ahead=weeks_ahead  # Add weeks_ahead parameter
+                                weeks_ahead=weeks_ahead
                             )
                             
                             results.append({
@@ -756,7 +855,7 @@ if ready_to_send and schedule_type == "Send Now":
                                 delivery_df,
                                 cc_emails=cc_emails if cc_emails else None,
                                 notification_type=notification_type,
-                                weeks_ahead=weeks_ahead  # Add weeks_ahead parameter
+                                weeks_ahead=weeks_ahead
                             )
                             
                             results.append({
@@ -836,7 +935,9 @@ with st.expander("ℹ️ Help & Information"):
     
     3. **Select Recipients**: 
        - **👤 Sales/Creators**: Send to sales people who created the deliveries
-       - **🏢 Customers**: Send directly to customers (if email available)
+       - **🏢 Customers**: Two-step selection process:
+         1. Select customers first
+         2. Then select specific contacts for those customers
        - **✉️ Custom Recipients**: Enter any email addresses manually
        - For customs: Automatically sent to custom.clearance@prostech.vn
     
@@ -870,7 +971,8 @@ with st.expander("ℹ️ Help & Information"):
     
     ### Notes:
     - Emails include DN Number and Province (recipient_state_province) information
-    - Customer emails are taken from customer_contact_email field
+    - Customer selection is now a two-step process similar to vendor selection
+    - Customer contacts are retrieved from customer_contact_email field
     - Custom recipients receive a comprehensive view of all deliveries
     - Only deliveries with remaining quantities are included
     - The system uses company SMTP settings for sending emails
