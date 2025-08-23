@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+
 class DeliveryDataLoader:
     """Load and process delivery data from database"""
     
@@ -125,7 +126,7 @@ class DeliveryDataLoader:
             
             if filters:
                 if filters.get('products'):
-                    # Extract pt_codes từ các product display đã chọn
+                    # Extract pt_codes from product display strings
                     pt_codes = [p.split(' - ')[0] for p in filters['products']]
                     query += " AND pt_code IN :pt_codes"
                     params['pt_codes'] = tuple(pt_codes)
@@ -180,7 +181,7 @@ class DeliveryDataLoader:
                     elif filters['foreign_filter'] == 'Domestic Only':
                         query += " AND customer_country_code = legal_entity_country_code"
                 
-                # Timeline status filter (new)
+                # Timeline status filter
                 if filters.get('timeline_status'):
                     query += " AND delivery_timeline_status IN :timeline_status"
                     params['timeline_status'] = tuple(filters['timeline_status'])
@@ -212,7 +213,7 @@ class DeliveryDataLoader:
                 'statuses': "SELECT DISTINCT shipment_status FROM delivery_full_view WHERE shipment_status IS NOT NULL ORDER BY shipment_status",
                 'timeline_statuses': "SELECT DISTINCT delivery_timeline_status FROM delivery_full_view WHERE delivery_timeline_status IS NOT NULL ORDER BY delivery_timeline_status",
                 'legal_entities': "SELECT DISTINCT legal_entity FROM delivery_full_view WHERE legal_entity IS NOT NULL ORDER BY legal_entity",
-                # Product query - sử dụng CONCAT trực tiếp
+                # Product query - using CONCAT directly
                 'products': """
                     SELECT DISTINCT 
                         CONCAT(pt_code, ' - ', product_pn) as product_display
@@ -229,7 +230,7 @@ class DeliveryDataLoader:
                     result = conn.execute(text(query))
                     options[key] = [row[0] for row in result]
                 
-                # NEW: Get date range from ETD
+                # Get date range from ETD
                 date_range_query = """
                 SELECT 
                     MIN(etd) as min_date,
@@ -243,7 +244,7 @@ class DeliveryDataLoader:
                     'max_date': date_result[1] if date_result[1] else datetime.now().date() + timedelta(days=365)
                 }
                 
-                # NEW: Get EPE company options
+                # Get EPE company options
                 epe_query = """
                 SELECT DISTINCT is_epe_company 
                 FROM delivery_full_view 
@@ -261,7 +262,7 @@ class DeliveryDataLoader:
                     epe_options.append("Non-EPE Companies Only")
                 options['epe_options'] = epe_options
                 
-                # NEW: Get Foreign/Domestic customer options
+                # Get Foreign/Domestic customer options
                 foreign_query = """
                 SELECT DISTINCT
                     CASE 
@@ -310,14 +311,14 @@ class DeliveryDataLoader:
                 df['period'] = df['etd'].dt.to_period('M').dt.start_time
                 period_format = '%B %Y'
             
-            # Group by period and aggregate - include new gap analysis
+            # Group by period and aggregate
             pivot_df = df.groupby(['period', 'customer', 'recipient_company']).agg({
                 'delivery_id': 'count',
                 'standard_quantity': 'sum',
                 'remaining_quantity_to_deliver': 'sum',
                 'gap_quantity': 'sum',
-                'product_gap_quantity': 'sum',  # New accurate gap
-                'product_total_remaining_demand': 'sum'  # Total demand
+                'product_gap_quantity': 'sum',
+                'product_total_remaining_demand': 'sum'
             }).reset_index()
             
             pivot_df.columns = ['Period', 'Customer', 'Ship To', 'Deliveries', 
@@ -397,7 +398,7 @@ class DeliveryDataLoader:
                     'end_date': end_date
                 })
             
-            # Debug: Check for duplicate columns
+            # Check for duplicate columns
             if not df.empty:
                 duplicate_cols = df.columns[df.columns.duplicated()].tolist()
                 if duplicate_cols:
@@ -415,7 +416,7 @@ class DeliveryDataLoader:
             return pd.DataFrame()
     
     def get_sales_urgent_deliveries(self, creator_name):
-        """Get overdue and due today deliveries for a specific sales person (NEW)"""
+        """Get overdue and due today deliveries for a specific sales person"""
         try:
             query = text("""
             SELECT 
@@ -480,7 +481,7 @@ class DeliveryDataLoader:
                     'creator_name': creator_name
                 })
             
-            # Debug: Check for duplicate columns
+            # Check for duplicate columns
             if not df.empty:
                 duplicate_cols = df.columns[df.columns.duplicated()].tolist()
                 if duplicate_cols:
@@ -573,10 +574,7 @@ class DeliveryDataLoader:
             return pd.DataFrame()
 
     def get_product_demand_from_dataframe(self, df):
-        """Calculate product demand analysis from filtered dataframe
-        
-        This method ensures consistency with filtered data shown in other tabs
-        """
+        """Calculate product demand analysis from filtered dataframe"""
         try:
             if df.empty:
                 return pd.DataFrame()
@@ -614,7 +612,6 @@ class DeliveryDataLoader:
                         logger.warning(f"Inconsistent {metric} values found for {len(inconsistent_products)} products")
             
             # Group by product to get aggregated metrics
-            # Build aggregation dict dynamically based on available columns
             agg_dict = {
                 'delivery_id': 'nunique',
                 'remaining_quantity_to_deliver': 'sum',
@@ -629,7 +626,7 @@ class DeliveryDataLoader:
                 'total_instock_at_preferred_warehouse': lambda x: x.max() if x.notna().any() else 0,
                 'product_gap_quantity': lambda x: x.max() if x.notna().any() else 0,
                 'product_total_remaining_demand': lambda x: x.max() if x.notna().any() else 0,
-                'product_fulfill_rate_percent': lambda x: x[x.notna()].mean() if x.notna().any() else None,  # Keep None to identify missing data
+                'product_fulfill_rate_percent': lambda x: x[x.notna()].mean() if x.notna().any() else None,
                 'product_fulfillment_status': lambda x: (
                     'Out of Stock' if any(x == 'Out of Stock') 
                     else 'Can Fulfill Partial' if any(x == 'Can Fulfill Partial')
@@ -647,7 +644,7 @@ class DeliveryDataLoader:
             # Group by product
             product_analysis = active_df.groupby(['product_id', 'product_pn', 'pt_code']).agg(agg_dict).reset_index()
             
-            # Rename columns - keep original names but add meaningful ones
+            # Rename columns
             column_mapping = {
                 'delivery_id': 'active_deliveries',
                 'oc_number': 'unique_orders',
@@ -680,7 +677,6 @@ class DeliveryDataLoader:
                 product_analysis = product_analysis.sort_values('total_remaining_demand', ascending=False)
             
             # After aggregation, recalculate fulfillment status based on actual data
-            # This ensures consistency with the displayed metrics
             if 'fulfill_rate' in product_analysis.columns and 'gap_quantity' in product_analysis.columns:
                 def determine_fulfillment_status(row):
                     if pd.isna(row['fulfill_rate']) or pd.isna(row['gap_quantity']):
@@ -712,7 +708,7 @@ class DeliveryDataLoader:
             logger.error(f"Error calculating product demand from dataframe: {e}")
             return pd.DataFrame()
 
-    def get_customs_clearance_summary(self):
+    def get_customs_clearance_summary(self, weeks_ahead=4):
         """Get summary of customs clearance deliveries (EPE + Foreign)"""
         try:
             query = text("""
@@ -722,14 +718,14 @@ class DeliveryDataLoader:
                 COUNT(DISTINCT CASE WHEN customer_country_code != legal_entity_country_code THEN customer_country_name END) as countries
             FROM delivery_full_view
             WHERE etd >= CURDATE()
-                AND etd <= DATE_ADD(CURDATE(), INTERVAL 4 WEEK)
+                AND etd <= DATE_ADD(CURDATE(), INTERVAL :weeks WEEK)
                 AND remaining_quantity_to_deliver > 0
                 AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
                 AND (is_epe_company = 'Yes' OR customer_country_code != legal_entity_country_code)
             """)
             
             with self.engine.connect() as conn:
-                result = conn.execute(query).fetchone()
+                result = conn.execute(query, {'weeks': weeks_ahead}).fetchone()
                 
             return pd.DataFrame([{
                 'epe_deliveries': result[0] or 0,
@@ -741,11 +737,11 @@ class DeliveryDataLoader:
             logger.error(f"Error getting customs clearance summary: {e}")
             return pd.DataFrame()
 
-    def get_customs_clearance_schedule(self):
+    def get_customs_clearance_schedule(self, weeks_ahead=4):
         """Get customs clearance schedule for EPE and Foreign customers"""
         try:
             today = datetime.now().date()
-            end_date = today + timedelta(weeks=4)
+            end_date = today + timedelta(weeks=weeks_ahead)
             
             query = text("""
             SELECT DISTINCT
@@ -843,7 +839,7 @@ class DeliveryDataLoader:
             # Debug: Log columns
             logger.info(f"Columns retrieved from customs query: {df.columns.tolist()}")
             
-            # Debug: Check for duplicate columns
+            # Check for duplicate columns
             if not df.empty:
                 duplicate_cols = df.columns[df.columns.duplicated()].tolist()
                 if duplicate_cols:
@@ -887,11 +883,11 @@ class DeliveryDataLoader:
             logger.error(f"Error filtering customs clearance by type: {e}")
             return pd.DataFrame()
 
-    def get_customs_country_summary(self):
+    def get_customs_country_summary(self, weeks_ahead=4):
         """Get summary of foreign deliveries by country"""
         try:
             today = datetime.now().date()
-            end_date = today + timedelta(weeks=4)
+            end_date = today + timedelta(weeks=weeks_ahead)
             
             query = text("""
             SELECT 
@@ -925,11 +921,11 @@ class DeliveryDataLoader:
             logger.error(f"Error getting customs country summary: {e}")
             return pd.DataFrame()
 
-    def get_epe_location_summary(self):
+    def get_epe_location_summary(self, weeks_ahead=4):
         """Get summary of EPE deliveries by location/industrial zone"""
         try:
             today = datetime.now().date()
-            end_date = today + timedelta(weeks=4)
+            end_date = today + timedelta(weeks=weeks_ahead)
             
             query = text("""
             SELECT 
@@ -963,8 +959,6 @@ class DeliveryDataLoader:
             logger.error(f"Error getting EPE location summary: {e}")
             return pd.DataFrame()
             
-    # Add these methods to your existing DeliveryDataLoader class in utils/data_loader.py
-
     def get_customer_deliveries(self, customer_name, weeks_ahead=4):
         """Get delivery schedule for a specific customer"""
         try:

@@ -1020,7 +1020,7 @@ class EmailSender:
         
         return results
     
-    def create_customs_clearance_html(self, delivery_df):
+    def create_customs_clearance_html(self, delivery_df, weeks_ahead=4):
         """Create HTML content for customs clearance email"""
         
         # Ensure delivery_date is datetime
@@ -1164,12 +1164,12 @@ class EmailSender:
         <body>
             <div class="header">
                 <h1>🛃 Custom Clearance Schedule</h1>
-                <p>EPE & Foreign Customer Deliveries - Next 4 Weeks</p>
+                <p>EPE & Foreign Customer Deliveries - Next {weeks_ahead} Week{'s' if weeks_ahead != 1 else ''}</p>
             </div>
             
             <div class="content">
                 <p>Dear Custom Clearance Team,</p>
-                <p>Please find below the customs clearance schedule for the next 4 weeks, 
+                <p>Please find below the customs clearance schedule for the next {weeks_ahead} week{'s' if weeks_ahead != 1 else ''}, 
                 including Export Processing Enterprise (EPE) deliveries and foreign customer shipments.</p>
                 
                 <div class="summary-section">
@@ -1560,7 +1560,7 @@ class EmailSender:
         output.seek(0)
         return output
 
-    def send_customs_clearance_email(self, recipient_email, delivery_df, cc_emails=None):
+    def send_customs_clearance_email(self, recipient_email, delivery_df, cc_emails=None, weeks_ahead=4):
         """Send customs clearance email to customs team"""
         try:
             # Check email configuration
@@ -1578,7 +1578,8 @@ class EmailSender:
             epe_count = delivery_df[delivery_df['customs_type'] == 'EPE']['delivery_id'].nunique()
             foreign_count = delivery_df[delivery_df['customs_type'] == 'Foreign']['delivery_id'].nunique()
             
-            msg['Subject'] = f"🛃 Custom Clearance Schedule - {epe_count} EPE & {foreign_count} Foreign Deliveries"
+            week_text = f"{weeks_ahead} Week" if weeks_ahead == 1 else f"{weeks_ahead} Weeks"
+            msg['Subject'] = f"🛃 Custom Clearance Schedule ({week_text}) - {epe_count} EPE & {foreign_count} Foreign Deliveries"
             msg['From'] = self.sender_email
             msg['To'] = recipient_email
             
@@ -1586,7 +1587,7 @@ class EmailSender:
                 msg['Cc'] = ', '.join(cc_emails)
             
             # Create HTML content
-            html_content = self.create_customs_clearance_html(delivery_df)
+            html_content = self.create_customs_clearance_html(delivery_df, weeks_ahead)
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
             
