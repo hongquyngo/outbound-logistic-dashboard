@@ -962,5 +962,239 @@ class DeliveryDataLoader:
         except Exception as e:
             logger.error(f"Error getting EPE location summary: {e}")
             return pd.DataFrame()
-        
             
+    # Add these methods to your existing DeliveryDataLoader class in utils/data_loader.py
+
+    def get_customer_deliveries(self, customer_name, weeks_ahead=4):
+        """Get delivery schedule for a specific customer"""
+        try:
+            today = datetime.now().date()
+            end_date = today + timedelta(weeks=weeks_ahead)
+            
+            query = text("""
+            SELECT 
+                DATE(etd) as delivery_date,
+                customer,
+                customer_code,
+                customer_contact,
+                customer_contact_email,
+                customer_contact_phone,
+                recipient_company,
+                recipient_company_code,
+                recipient_contact,
+                recipient_contact_email,
+                recipient_contact_phone,
+                recipient_address,
+                recipient_state_province,
+                recipient_country_name,
+                delivery_id,
+                dn_number,
+                sto_dr_line_id,
+                oc_number,
+                oc_line_id,
+                product_pn,
+                product_id,
+                pt_code,
+                package_size,
+                standard_quantity,
+                selling_quantity,
+                uom_conversion,
+                remaining_quantity_to_deliver,
+                total_instock_at_preferred_warehouse,
+                gap_quantity,
+                product_gap_quantity,
+                product_total_remaining_demand,
+                product_fulfill_rate_percent,
+                delivery_demand_percentage,
+                shipment_status,
+                shipment_status_vn,
+                fulfillment_status,
+                product_fulfillment_status,
+                delivery_timeline_status,
+                days_overdue,
+                preferred_warehouse,
+                is_epe_company,
+                legal_entity,
+                created_by_name,
+                created_date
+            FROM delivery_full_view
+            WHERE customer = :customer_name
+                AND etd >= :today
+                AND etd <= :end_date
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+            ORDER BY delivery_date, recipient_company, delivery_id, sto_dr_line_id
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params={
+                    'customer_name': customer_name,
+                    'today': today,
+                    'end_date': end_date
+                })
+            
+            # Add total_quantity alias
+            if not df.empty:
+                df['total_quantity'] = df['remaining_quantity_to_deliver']
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting customer deliveries: {e}")
+            return pd.DataFrame()
+
+    def get_all_deliveries_summary(self, weeks_ahead=4):
+        """Get all deliveries summary for custom recipients"""
+        try:
+            today = datetime.now().date()
+            end_date = today + timedelta(weeks=weeks_ahead)
+            
+            query = text("""
+            SELECT 
+                DATE(etd) as delivery_date,
+                customer,
+                customer_code,
+                customer_contact,
+                customer_contact_email,
+                customer_contact_phone,
+                recipient_company,
+                recipient_company_code,
+                recipient_contact,
+                recipient_contact_email,
+                recipient_contact_phone,
+                recipient_address,
+                recipient_state_province,
+                recipient_country_name,
+                delivery_id,
+                dn_number,
+                sto_dr_line_id,
+                oc_number,
+                oc_line_id,
+                product_pn,
+                product_id,
+                pt_code,
+                package_size,
+                standard_quantity,
+                selling_quantity,
+                uom_conversion,
+                remaining_quantity_to_deliver,
+                total_instock_at_preferred_warehouse,
+                gap_quantity,
+                product_gap_quantity,
+                product_total_remaining_demand,
+                product_fulfill_rate_percent,
+                delivery_demand_percentage,
+                shipment_status,
+                shipment_status_vn,
+                fulfillment_status,
+                product_fulfillment_status,
+                delivery_timeline_status,
+                days_overdue,
+                preferred_warehouse,
+                is_epe_company,
+                legal_entity,
+                created_by_name,
+                created_date
+            FROM delivery_full_view
+            WHERE etd >= :today
+                AND etd <= :end_date
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+            ORDER BY delivery_date, customer, recipient_company, delivery_id, sto_dr_line_id
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params={
+                    'today': today,
+                    'end_date': end_date
+                })
+            
+            # Add total_quantity alias
+            if not df.empty:
+                df['total_quantity'] = df['remaining_quantity_to_deliver']
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting all deliveries summary: {e}")
+            return pd.DataFrame()
+
+    def get_all_urgent_deliveries(self):
+        """Get all urgent deliveries (overdue and due today) for custom recipients"""
+        try:
+            query = text("""
+            SELECT 
+                DATE(etd) as delivery_date,
+                customer,
+                customer_code,
+                customer_contact,
+                customer_contact_email,
+                customer_contact_phone,
+                recipient_company,
+                recipient_company_code,
+                recipient_contact,
+                recipient_contact_email,
+                recipient_contact_phone,
+                recipient_address,
+                recipient_state_province,
+                recipient_country_name,
+                delivery_id,
+                dn_number,
+                sto_dr_line_id,
+                oc_number,
+                oc_line_id,
+                product_pn,
+                product_id,
+                pt_code,
+                package_size,
+                standard_quantity,
+                selling_quantity,
+                uom_conversion,
+                remaining_quantity_to_deliver,
+                total_instock_at_preferred_warehouse,
+                total_instock_all_warehouses,
+                gap_quantity,
+                product_gap_quantity,
+                product_total_remaining_demand,
+                product_fulfill_rate_percent,
+                delivery_demand_percentage,
+                shipment_status,
+                shipment_status_vn,
+                fulfillment_status,
+                product_fulfillment_status,
+                delivery_timeline_status,
+                days_overdue,
+                preferred_warehouse,
+                is_epe_company,
+                legal_entity,
+                created_by_name,
+                created_date
+            FROM delivery_full_view
+            WHERE delivery_timeline_status IN ('Overdue', 'Due Today')
+                AND remaining_quantity_to_deliver > 0
+                AND shipment_status NOT IN ('DELIVERED', 'COMPLETED')
+            ORDER BY 
+                delivery_timeline_status DESC,
+                days_overdue DESC,
+                delivery_date,
+                customer,
+                delivery_id,
+                sto_dr_line_id
+            """)
+            
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn)
+            
+            # Add total_quantity alias
+            if not df.empty:
+                df['total_quantity'] = df['remaining_quantity_to_deliver']
+                
+                overdue_count = df[df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
+                due_today_count = df[df['delivery_timeline_status'] == 'Due Today']['delivery_id'].nunique()
+                logger.info(f"Loaded {overdue_count} overdue and {due_today_count} due today deliveries for all customers")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting all urgent deliveries: {e}")
+            return pd.DataFrame()

@@ -1,3 +1,6 @@
+# outbound_logistic_dashboard app
+# utils/db.py
+
 import pandas as pd
 from sqlalchemy import create_engine
 from urllib.parse import quote_plus

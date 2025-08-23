@@ -30,7 +30,7 @@ class EmailSender:
         logger.info(f"Email sender initialized with: {self.sender_email} via {self.smtp_host}:{self.smtp_port}")
     
     def create_overdue_alerts_html(self, delivery_df, sales_name):
-        """Create HTML content for overdue alerts email (NEW)"""
+        """Create HTML content for overdue alerts email"""
         
         # Ensure delivery_date is datetime
         delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
@@ -295,25 +295,20 @@ class EmailSender:
         
         return html
     
-    def create_delivery_schedule_html(self, delivery_df, sales_name):
-        """Create HTML content for delivery schedule email with enhanced information"""
+    def create_delivery_schedule_html(self, delivery_df, recipient_name, weeks_ahead=4):
+        """Create HTML content for delivery schedule email with DN Number and Province"""
         
-        # Group by week - Fixed week calculation
+        # Ensure delivery_date is datetime
         delivery_df['delivery_date'] = pd.to_datetime(delivery_df['delivery_date'])
         
-        # Calculate week start (Monday) for each delivery date
+        # Calculate week information
         delivery_df['week_start'] = delivery_df['delivery_date'] - pd.to_timedelta(delivery_df['delivery_date'].dt.dayofweek, unit='D')
         delivery_df['week_end'] = delivery_df['week_start'] + timedelta(days=6)
         delivery_df['week_key'] = delivery_df['week_start'].dt.strftime('%Y-%m-%d')
-        
-        # Calculate ISO week number for display
         delivery_df['week'] = delivery_df['delivery_date'].dt.isocalendar().week
         delivery_df['year'] = delivery_df['delivery_date'].dt.year
         
-        # Debug: Check columns
-        logger.debug(f"Columns in delivery_df: {delivery_df.columns.tolist()}")
-        
-        # Calculate summary statistics with new fields
+        # Calculate summary statistics
         out_of_stock_products = 0
         avg_fulfill_rate = 100.0
         
@@ -322,6 +317,9 @@ class EmailSender:
         
         if 'product_fulfill_rate_percent' in delivery_df.columns and 'product_id' in delivery_df.columns:
             avg_fulfill_rate = delivery_df.groupby('product_id')['product_fulfill_rate_percent'].first().mean()
+        
+        # Format weeks text
+        week_text = f"{weeks_ahead} Week" if weeks_ahead == 1 else f"{weeks_ahead} Weeks"
         
         # Start HTML
         html = f"""
@@ -415,13 +413,13 @@ class EmailSender:
         <body>
             <div class="header">
                 <h1>📦 Delivery Schedule Notification</h1>
-                <p>Your Next 4 Weeks Delivery Plan</p>
+                <p>Your Upcoming Delivery Plan - Next {week_text}</p>
             </div>
             
             <div class="content">
-                <p>Dear {sales_name},</p>
-                <p>Please find below your delivery schedule for the next 4 weeks. 
-                   Make sure to coordinate with customers for smooth delivery operations.</p>
+                <p>Dear {recipient_name},</p>
+                <p>Please find below your upcoming delivery schedule for the next {weeks_ahead} week{'s' if weeks_ahead != 1 else ''}. 
+                Make sure to coordinate with customers for smooth delivery operations.</p>
                 
                 <div class="summary">
                     <h3>📊 Summary</h3>
@@ -465,7 +463,6 @@ class EmailSender:
             # Calculate totals for this week
             week_unique_deliveries = week_df.groupby(['delivery_date', 'customer', 'recipient_company']).ngroups
             week_unique_products = week_df['product_id'].nunique()
-            week_line_items = len(week_df)
             week_total_qty = week_df['remaining_quantity_to_deliver'].sum()
             
             html += f"""
@@ -482,71 +479,54 @@ class EmailSender:
                     <table>
                         <tr>
                             <th style="width: 80px;">Date</th>
-                            <th style="width: 180px;">Customer</th>
-                            <th style="width: 180px;">Ship To</th>
-                            <th style="width: 100px;">PT Code</th>
-                            <th style="width: 140px;">Product</th>
-                            <th style="width: 80px;">Qty</th>
-                            <th style="width: 100px;">Fulfillment</th>
+                            <th style="width: 100px;">DN Number</th>
+                            <th style="width: 150px;">Customer</th>
+                            <th style="width: 150px;">Ship To</th>
+                            <th style="width: 100px;">Province</th>
+                            <th style="width: 80px;">PT Code</th>
+                            <th style="width: 120px;">Product</th>
+                            <th style="width: 60px;">Qty</th>
+                            <th style="width: 90px;">Fulfillment</th>
                         </tr>
             """
             
-            # Group by date, customer, recipient, and PRODUCT ID (not product_pn) for display
-            # Keep groupby columns separate from aggregation columns
+            # Group by delivery for display
             if 'product_id' in week_df.columns:
-                group_cols = ['delivery_date', 'customer', 'recipient_company', 
-                             'recipient_state_province', 'recipient_country_name', 
-                             'product_id', 'pt_code', 'product_pn']
+                group_cols = ['delivery_date', 'dn_number', 'customer', 'recipient_company', 
+                            'recipient_state_province', 'product_id', 'pt_code', 'product_pn']
             else:
-                # Fallback if product_id not available
-                group_cols = ['delivery_date', 'customer', 'recipient_company', 
-                             'recipient_state_province', 'recipient_country_name', 
-                             'pt_code', 'product_pn']
+                group_cols = ['delivery_date', 'dn_number', 'customer', 'recipient_company', 
+                            'recipient_state_province', 'pt_code', 'product_pn']
             
-            # Create a copy for aggregation to avoid modifying original
-            agg_df = week_df.copy()
-            
-            # Build aggregation dictionary
+            # Create aggregation
             agg_dict = {
                 'remaining_quantity_to_deliver': 'sum'
             }
             
-            # Add status columns for aggregation (take first value after grouping)
-            if 'fulfillment_status' in agg_df.columns:
-                agg_dict['fulfillment_status'] = lambda x: 'Mixed' if x.nunique() > 1 else x.iloc[0]
-            
-            if 'product_fulfillment_status' in agg_df.columns:
+            if 'product_fulfillment_status' in week_df.columns:
                 agg_dict['product_fulfillment_status'] = 'first'
             
-            try:
-                display_group = agg_df.groupby(group_cols, as_index=False).agg(agg_dict)
-                # Sort by date and product - use pt_code if product_id not available
-                if 'product_id' in display_group.columns:
-                    display_group = display_group.sort_values(['delivery_date', 'product_id'])
-                else:
-                    display_group = display_group.sort_values(['delivery_date', 'pt_code'])
-            except Exception as e:
-                logger.error(f"Error in groupby: {e}")
-                # Fallback: simple grouping without status columns
-                display_group = agg_df.groupby(group_cols, as_index=False).agg({
-                    'remaining_quantity_to_deliver': 'sum'
-                })
-                if 'product_id' in display_group.columns:
-                    display_group = display_group.sort_values(['delivery_date', 'product_id'])
-                else:
-                    display_group = display_group.sort_values(['delivery_date', 'pt_code'])
+            display_group = week_df.groupby(group_cols, as_index=False).agg(agg_dict)
+            
+            # Sort by date and DN number
+            display_group = display_group.sort_values(['delivery_date', 'dn_number'])
             
             # Add rows to table
             for _, row in display_group.iterrows():
                 # Product fulfillment status
-                product_status = row.get('product_fulfillment_status', row.get('fulfillment_status', 'Unknown'))
+                product_status = row.get('product_fulfillment_status', 'Unknown')
                 status_class = 'urgent' if product_status in ['Out of Stock', 'Can Fulfill Partial'] else ''
+                
+                # Format province name
+                province = row['recipient_state_province'] if pd.notna(row['recipient_state_province']) else ''
                 
                 html += f"""
                         <tr>
                             <td>{row['delivery_date'].strftime('%b %d')}</td>
+                            <td>{row['dn_number']}</td>
                             <td>{row['customer']}</td>
                             <td>{row['recipient_company']}</td>
+                            <td>{province}</td>
                             <td>{row['pt_code']}</td>
                             <td>{row['product_pn']}</td>
                             <td>{row['remaining_quantity_to_deliver']:,.0f}</td>
@@ -564,62 +544,120 @@ class EmailSender:
             <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 5px;">
                 <h4>Fulfillment Status:</h4>
                 <p>• <strong>Can Fulfill All:</strong> Sufficient inventory for all deliveries<br>
-                   • <strong>Can Fulfill Partial:</strong> Limited inventory available<br>
-                   • <strong>Out of Stock:</strong> No inventory available</p>
+                • <strong>Can Fulfill Partial:</strong> Limited inventory available<br>
+                • <strong>Out of Stock:</strong> No inventory available</p>
             </div>
         """
         
-        # Add calendar buttons
-        calendar_gen = CalendarEventGenerator()
-        google_cal_links = calendar_gen.create_google_calendar_links(sales_name, delivery_df)
-        outlook_cal_links = calendar_gen.create_outlook_calendar_links(sales_name, delivery_df)
-        
-        # Show calendar links for each date
+        # Add footer
         html += """
-            <div style="margin: 30px 0;">
-                <h3>📅 Add to Your Calendar</h3>
-                <p style="margin-bottom: 20px;">Click below to add individual delivery dates to your calendar:</p>
-                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px;">
-        """
-        
-        # Add individual date links
-        for i, gcal_link in enumerate(google_cal_links[:5]):  # Show first 5 dates
-            date_str = gcal_link['date'].strftime('%b %d')
-            html += f"""
-                    <div style="margin: 10px 0;">
-                        <span style="font-weight: bold;">{date_str}:</span>
-                        <a href="{gcal_link['link']}" target="_blank" 
-                           style="margin: 0 10px; color: #4285f4;">📅 Google Calendar</a>
-                        <a href="{outlook_cal_links[i]['link']}" target="_blank" 
-                           style="margin: 0 10px; color: #0078d4;">📅 Outlook</a>
-                    </div>
-            """
-        
-        if len(google_cal_links) > 5:
-            html += f"""
-                    <p style="margin-top: 10px; font-style: italic;">
-                        ... and {len(google_cal_links) - 5} more dates
-                    </p>
-            """
-        
-        html += """
+                <div class="footer">
+                    <p>This is an automated email from Outbound Logistics System</p>
+                    <p>For questions, please contact: <a href="mailto:outbound@prostech.vn">outbound@prostech.vn</a></p>
                 </div>
-                <p style="margin-top: 15px; font-size: 12px; color: #666;">
-                    Or download the attached .ics file to import all dates into any calendar application
-                </p>
             </div>
-            
-            <div class="footer">
-                <p>This is an automated email from Outbound Logistics System</p>
-                <p>For questions, please contact: <a href="mailto:outbound@prostech.vn">outbound@prostech.vn</a></p>
-            </div>
-        </div>
         </body>
         </html>
         """
         
         return html
-    
+
+    def send_delivery_schedule_email(self, recipient_email, recipient_name, delivery_df, 
+                                cc_emails=None, notification_type="📅 Delivery Schedule", 
+                                weeks_ahead=4):
+        """Send delivery schedule email with enhanced content"""
+        try:
+            # Check email configuration
+            if not self.sender_email or not self.sender_password:
+                logger.error("Email configuration missing. Please set EMAIL_SENDER and EMAIL_PASSWORD.")
+                return False, "Email configuration missing. Please check environment variables."
+            
+            # Remove duplicate columns
+            delivery_df = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
+            
+            # Create message
+            msg = MIMEMultipart('alternative')
+            
+            # Set subject based on notification type with dynamic weeks
+            if notification_type == "🚨 Overdue Alerts":
+                overdue_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
+                due_today_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Due Today']['delivery_id'].nunique()
+                msg['Subject'] = f"🚨 URGENT: {overdue_count} Overdue & {due_today_count} Due Today Deliveries - {recipient_name}"
+            else:
+                # Dynamic subject with weeks_ahead
+                week_text = f"{weeks_ahead} Week" if weeks_ahead == 1 else f"{weeks_ahead} Weeks"
+                msg['Subject'] = f"Delivery Schedule - Next {week_text} - {recipient_name}"
+            
+            msg['From'] = self.sender_email
+            msg['To'] = recipient_email
+            
+            if cc_emails:
+                msg['Cc'] = ', '.join(cc_emails)
+            
+            # Create HTML content based on notification type
+            if notification_type == "🚨 Overdue Alerts":
+                html_content = self.create_overdue_alerts_html(delivery_df, recipient_name)
+            else:
+                html_content = self.create_delivery_schedule_html(delivery_df, recipient_name, weeks_ahead)
+            
+            html_part = MIMEText(html_content, 'html')
+            msg.attach(html_part)
+            
+            # Create Excel attachment
+            excel_data = self.create_excel_attachment(delivery_df, notification_type)
+            excel_part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            excel_part.set_payload(excel_data.read())
+            encoders.encode_base64(excel_part)
+            
+            # Set filename based on notification type and recipient
+            if notification_type == "🚨 Overdue Alerts":
+                filename = f"urgent_deliveries_{recipient_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            else:
+                filename = f"delivery_schedule_{recipient_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            
+            excel_part.add_header(
+                'Content-Disposition',
+                f'attachment; filename="{filename}"'
+            )
+            msg.attach(excel_part)
+            
+            # Create ICS calendar attachment (only for delivery schedule)
+            if notification_type == "📅 Delivery Schedule":
+                try:
+                    calendar_gen = CalendarEventGenerator()
+                    ics_content = calendar_gen.create_ics_content(recipient_name, delivery_df, self.sender_email)
+                    
+                    if ics_content:
+                        ics_part = MIMEBase('text', 'calendar')
+                        ics_part.set_payload(ics_content.encode('utf-8'))
+                        encoders.encode_base64(ics_part)
+                        ics_part.add_header(
+                            'Content-Disposition',
+                            f'attachment; filename="delivery_schedule_{recipient_name.replace(" ", "_")}_{datetime.now().strftime("%Y%m%d")}.ics"'
+                        )
+                        msg.attach(ics_part)
+                except Exception as e:
+                    logger.warning(f"Error creating calendar attachment: {e}")
+            
+            # Send email
+            logger.info(f"Attempting to send {notification_type} email to {recipient_email}...")
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                
+                recipients = [recipient_email]
+                if cc_emails:
+                    recipients.extend(cc_emails)
+                
+                server.sendmail(self.sender_email, recipients, msg.as_string())
+            
+            logger.info(f"Email sent successfully to {recipient_email}")
+            return True, "Email sent successfully"
+            
+        except Exception as e:
+            logger.error(f"Error sending email: {e}", exc_info=True)
+            return False, str(e)
+
     def create_excel_attachment(self, delivery_df, notification_type="📅 Delivery Schedule"):
         """Create Excel file as attachment with enhanced information"""
         output = io.BytesIO()
@@ -640,7 +678,7 @@ class EmailSender:
         # Remove duplicate columns before processing
         excel_df = excel_df.loc[:, ~excel_df.columns.duplicated()]
         
-        # Select and order important columns for better readability - Updated with new fields
+        # Select and order important columns for better readability
         important_columns = [
             'delivery_date',
             'delivery_timeline_status',
@@ -677,7 +715,7 @@ class EmailSender:
             'is_epe_company'
         ]
         
-        # Filter to only include columns that exist and are not duplicated
+        # Filter to only include columns that exist
         available_columns = [col for col in important_columns if col in excel_df.columns]
         
         # Add any remaining columns not in the important list
@@ -796,7 +834,7 @@ class EmailSender:
         return output
     
     def _create_urgent_summary_sheet(self, delivery_df):
-        """Create summary sheet for urgent alerts (NEW)"""
+        """Create summary sheet for urgent alerts"""
         # Remove duplicate columns first
         delivery_df_clean = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
         
@@ -919,118 +957,6 @@ class EmailSender:
         
         return product_analysis
     
-    def send_delivery_schedule_email(self, recipient_email, sales_name, delivery_df, cc_emails=None, notification_type="📅 Delivery Schedule"):
-        """Send delivery schedule email with enhanced content"""
-        try:
-            # Check email configuration
-            if not self.sender_email or not self.sender_password:
-                logger.error("Email configuration missing. Please set EMAIL_SENDER and EMAIL_PASSWORD.")
-                return False, "Email configuration missing. Please check environment variables."
-            
-            # Debug: Check for duplicate columns
-            logger.info(f"Columns in delivery_df: {delivery_df.columns.tolist()}")
-            duplicate_cols = delivery_df.columns[delivery_df.columns.duplicated()].tolist()
-            if duplicate_cols:
-                logger.warning(f"Duplicate columns found: {duplicate_cols}")
-                # Remove duplicates
-                delivery_df = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
-            
-            # Create message
-            msg = MIMEMultipart('alternative')
-            
-            # Set subject based on notification type
-            if notification_type == "🚨 Overdue Alerts":
-                # Count overdue and due today
-                overdue_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
-                due_today_count = delivery_df[delivery_df['delivery_timeline_status'] == 'Due Today']['delivery_id'].nunique()
-                msg['Subject'] = f"🚨 URGENT: {overdue_count} Overdue & {due_today_count} Due Today Deliveries - {sales_name}"
-            else:
-                msg['Subject'] = f"Delivery Schedule - Next 4 Weeks - {sales_name}"
-            
-            msg['From'] = self.sender_email
-            msg['To'] = recipient_email
-            
-            if cc_emails:
-                msg['Cc'] = ', '.join(cc_emails)
-            
-            # Create HTML content based on notification type
-            if notification_type == "🚨 Overdue Alerts":
-                html_content = self.create_overdue_alerts_html(delivery_df, sales_name)
-            else:
-                html_content = self.create_delivery_schedule_html(delivery_df, sales_name)
-            
-            html_part = MIMEText(html_content, 'html')
-            msg.attach(html_part)
-            
-            # Create Excel attachment
-            try:
-                excel_data = self.create_excel_attachment(delivery_df, notification_type)
-                excel_part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                excel_part.set_payload(excel_data.read())
-                encoders.encode_base64(excel_part)
-                
-                # Set filename based on notification type
-                if notification_type == "🚨 Overdue Alerts":
-                    filename = f"urgent_deliveries_{sales_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                else:
-                    filename = f"delivery_schedule_{sales_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                
-                excel_part.add_header(
-                    'Content-Disposition',
-                    f'attachment; filename="{filename}"'
-                )
-                msg.attach(excel_part)
-            except Exception as e:
-                logger.error(f"Error creating Excel attachment: {e}")
-                # Continue without Excel attachment
-                return False, f"Error creating Excel attachment: {str(e)}"
-            
-            # Create ICS calendar attachment (only for delivery schedule)
-            if notification_type == "📅 Delivery Schedule":
-                try:
-                    calendar_gen = CalendarEventGenerator()
-                    ics_content = calendar_gen.create_ics_content(sales_name, delivery_df, self.sender_email)
-                    
-                    if ics_content:  # Check if content was generated
-                        ics_part = MIMEBase('text', 'calendar')
-                        ics_part.set_payload(ics_content.encode('utf-8'))
-                        encoders.encode_base64(ics_part)
-                        ics_part.add_header(
-                            'Content-Disposition',
-                            f'attachment; filename="delivery_schedule_{sales_name}_{datetime.now().strftime("%Y%m%d")}.ics"'
-                        )
-                        msg.attach(ics_part)
-                except Exception as e:
-                    logger.warning(f"Error creating calendar attachment: {e}")
-                    # Continue without calendar attachment
-            
-            # Send email
-            logger.info(f"Attempting to send {notification_type} email to {recipient_email}...")
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                server.starttls()
-                server.login(self.sender_email, self.sender_password)
-                
-                recipients = [recipient_email]
-                if cc_emails:
-                    recipients.extend(cc_emails)
-                
-                server.sendmail(self.sender_email, recipients, msg.as_string())
-            
-            logger.info(f"Email sent successfully to {recipient_email}")
-            return True, "Email sent successfully"
-            
-        except smtplib.SMTPAuthenticationError:
-            error_msg = "Email authentication failed. Please check your email credentials."
-            logger.error(error_msg)
-            return False, error_msg
-        except smtplib.SMTPException as e:
-            error_msg = f"SMTP error: {str(e)}"
-            logger.error(error_msg)
-            return False, error_msg
-        except Exception as e:
-            logger.error(f"Error sending email: {e}", exc_info=True)
-            return False, str(e)
-    
     def send_bulk_delivery_schedules(self, sales_deliveries, progress_callback=None):
         """Send delivery schedules to multiple sales people"""
         results = []
@@ -1056,8 +982,6 @@ class EmailSender:
         
         return results
     
-        # Add these methods to utils/email_sender.py
-
     def create_customs_clearance_html(self, delivery_df):
         """Create HTML content for customs clearance email"""
         
