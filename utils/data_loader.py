@@ -20,7 +20,7 @@ class DeliveryDataLoader:
     def load_delivery_data(_self, filters=None):
         """Load delivery data from delivery_full_view"""
         try:
-            # Base query - Updated with new fields
+            # Base query - Updated with brand field
             query = """
             SELECT 
                 delivery_id,
@@ -59,6 +59,7 @@ class DeliveryDataLoader:
                 product_pn,
                 pt_code,
                 package_size,
+                brand,
                 
                 -- Stock info
                 sto_dr_line_id,
@@ -125,12 +126,24 @@ class DeliveryDataLoader:
             params = {}
             
             if filters:
+                # Products filter with exclude option
                 if filters.get('products'):
-                    # Extract pt_codes from product display strings
                     pt_codes = [p.split(' - ')[0] for p in filters['products']]
-                    query += " AND pt_code IN :pt_codes"
+                    if filters.get('exclude_products', False):
+                        query += " AND pt_code NOT IN :pt_codes"
+                    else:
+                        query += " AND pt_code IN :pt_codes"
                     params['pt_codes'] = tuple(pt_codes)
+                
+                # Brand filter with exclude option
+                if filters.get('brands'):
+                    if filters.get('exclude_brands', False):
+                        query += " AND brand NOT IN :brands"
+                    else:
+                        query += " AND brand IN :brands"
+                    params['brands'] = tuple(filters['brands'])
                     
+                # Date range
                 if filters.get('date_from'):
                     query += " AND etd >= :date_from"
                     params['date_from'] = filters['date_from']
@@ -139,52 +152,83 @@ class DeliveryDataLoader:
                     query += " AND etd <= :date_to"
                     params['date_to'] = filters['date_to']
                 
+                # Creators filter with exclude option
                 if filters.get('creators'):
-                    query += " AND created_by_name IN :creators"
+                    if filters.get('exclude_creators', False):
+                        query += " AND created_by_name NOT IN :creators"
+                    else:
+                        query += " AND created_by_name IN :creators"
                     params['creators'] = tuple(filters['creators'])
                 
+                # Customers filter with exclude option
                 if filters.get('customers'):
-                    query += " AND customer IN :customers"
+                    if filters.get('exclude_customers', False):
+                        query += " AND customer NOT IN :customers"
+                    else:
+                        query += " AND customer IN :customers"
                     params['customers'] = tuple(filters['customers'])
                 
+                # Ship-to companies filter with exclude option
                 if filters.get('ship_to_companies'):
-                    query += " AND recipient_company IN :ship_to_companies"
+                    if filters.get('exclude_ship_to_companies', False):
+                        query += " AND recipient_company NOT IN :ship_to_companies"
+                    else:
+                        query += " AND recipient_company IN :ship_to_companies"
                     params['ship_to_companies'] = tuple(filters['ship_to_companies'])
                 
+                # States filter with exclude option
                 if filters.get('states'):
-                    query += " AND recipient_state_province IN :states"
+                    if filters.get('exclude_states', False):
+                        query += " AND recipient_state_province NOT IN :states"
+                    else:
+                        query += " AND recipient_state_province IN :states"
                     params['states'] = tuple(filters['states'])
                 
+                # Countries filter with exclude option
                 if filters.get('countries'):
-                    query += " AND recipient_country_name IN :countries"
+                    if filters.get('exclude_countries', False):
+                        query += " AND recipient_country_name NOT IN :countries"
+                    else:
+                        query += " AND recipient_country_name IN :countries"
                     params['countries'] = tuple(filters['countries'])
                 
+                # Statuses filter with exclude option
                 if filters.get('statuses'):
-                    query += " AND shipment_status IN :statuses"
+                    if filters.get('exclude_statuses', False):
+                        query += " AND shipment_status NOT IN :statuses"
+                    else:
+                        query += " AND shipment_status IN :statuses"
                     params['statuses'] = tuple(filters['statuses'])
                 
+                # Legal entities filter with exclude option
                 if filters.get('legal_entities'):
-                    query += " AND legal_entity IN :legal_entities"
+                    if filters.get('exclude_legal_entities', False):
+                        query += " AND legal_entity NOT IN :legal_entities"
+                    else:
+                        query += " AND legal_entity IN :legal_entities"
                     params['legal_entities'] = tuple(filters['legal_entities'])
                 
-                # EPE Company filter
+                # Timeline status filter with exclude option
+                if filters.get('timeline_status'):
+                    if filters.get('exclude_timeline_status', False):
+                        query += " AND delivery_timeline_status NOT IN :timeline_status"
+                    else:
+                        query += " AND delivery_timeline_status IN :timeline_status"
+                    params['timeline_status'] = tuple(filters['timeline_status'])
+                
+                # EPE Company filter (no exclude option needed as it's a radio button)
                 if filters.get('epe_filter'):
                     if filters['epe_filter'] == 'EPE Companies Only':
                         query += " AND is_epe_company = 'Yes'"
                     elif filters['epe_filter'] == 'Non-EPE Companies Only':
                         query += " AND is_epe_company = 'No'"
                 
-                # Foreign customer filter
+                # Foreign customer filter (no exclude option needed as it's a radio button)
                 if filters.get('foreign_filter'):
                     if filters['foreign_filter'] == 'Foreign Only':
                         query += " AND customer_country_code != legal_entity_country_code"
                     elif filters['foreign_filter'] == 'Domestic Only':
                         query += " AND customer_country_code = legal_entity_country_code"
-                
-                # Timeline status filter
-                if filters.get('timeline_status'):
-                    query += " AND delivery_timeline_status IN :timeline_status"
-                    params['timeline_status'] = tuple(filters['timeline_status'])
             
             # Order by
             query += " ORDER BY delivery_id DESC, sto_dr_line_id DESC"
@@ -213,6 +257,7 @@ class DeliveryDataLoader:
                 'statuses': "SELECT DISTINCT shipment_status FROM delivery_full_view WHERE shipment_status IS NOT NULL ORDER BY shipment_status",
                 'timeline_statuses': "SELECT DISTINCT delivery_timeline_status FROM delivery_full_view WHERE delivery_timeline_status IS NOT NULL ORDER BY delivery_timeline_status",
                 'legal_entities': "SELECT DISTINCT legal_entity FROM delivery_full_view WHERE legal_entity IS NOT NULL ORDER BY legal_entity",
+                'brands': "SELECT DISTINCT brand FROM delivery_full_view WHERE brand IS NOT NULL ORDER BY brand",
                 # Product query - using CONCAT directly
                 'products': """
                     SELECT DISTINCT 
@@ -362,6 +407,7 @@ class DeliveryDataLoader:
                 product_id,
                 pt_code,
                 package_size,
+                brand,
                 standard_quantity,
                 selling_quantity,
                 uom_conversion,
@@ -415,6 +461,7 @@ class DeliveryDataLoader:
             logger.error(f"Error getting sales delivery summary: {e}")
             return pd.DataFrame()
     
+    # All other methods remain the same...
     def get_sales_urgent_deliveries(self, creator_name):
         """Get overdue and due today deliveries for a specific sales person"""
         try:
@@ -440,6 +487,7 @@ class DeliveryDataLoader:
                 product_id,
                 pt_code,
                 package_size,
+                brand,
                 standard_quantity,
                 selling_quantity,
                 uom_conversion,
@@ -520,7 +568,8 @@ class DeliveryDataLoader:
                 fulfillment_status,
                 product_fulfillment_status,
                 created_by_name,
-                is_epe_company
+                is_epe_company,
+                brand
             FROM delivery_full_view
             WHERE delivery_timeline_status = 'Overdue'
                 AND remaining_quantity_to_deliver > 0
@@ -545,6 +594,7 @@ class DeliveryDataLoader:
                 product_id,
                 product_pn,
                 pt_code,
+                brand,
                 COUNT(DISTINCT delivery_id) as active_deliveries,
                 SUM(remaining_quantity_to_deliver) as total_remaining_demand,
                 MAX(total_instock_all_warehouses) as total_inventory,
@@ -562,7 +612,7 @@ class DeliveryDataLoader:
                 query += " AND product_id = :product_id"
                 params['product_id'] = product_id
             
-            query += " GROUP BY product_id, product_pn, pt_code ORDER BY total_remaining_demand DESC"
+            query += " GROUP BY product_id, product_pn, pt_code, brand ORDER BY total_remaining_demand DESC"
             
             with self.engine.connect() as conn:
                 df = pd.read_sql(text(query), conn, params=params)
@@ -612,6 +662,10 @@ class DeliveryDataLoader:
                         logger.warning(f"Inconsistent {metric} values found for {len(inconsistent_products)} products")
             
             # Group by product to get aggregated metrics
+            group_cols = ['product_id', 'product_pn', 'pt_code']
+            if 'brand' in active_df.columns:
+                group_cols.append('brand')
+            
             agg_dict = {
                 'delivery_id': 'nunique',
                 'remaining_quantity_to_deliver': 'sum',
@@ -642,7 +696,7 @@ class DeliveryDataLoader:
                     agg_dict[col] = agg_func
             
             # Group by product
-            product_analysis = active_df.groupby(['product_id', 'product_pn', 'pt_code']).agg(agg_dict).reset_index()
+            product_analysis = active_df.groupby(group_cols).agg(agg_dict).reset_index()
             
             # Rename columns
             column_mapping = {
@@ -708,6 +762,9 @@ class DeliveryDataLoader:
             logger.error(f"Error calculating product demand from dataframe: {e}")
             return pd.DataFrame()
 
+    # All other methods remain the same (get_customs_clearance_summary, get_customs_clearance_schedule, etc.)
+    # These methods don't need changes for the brand filter and exclude functionality
+    
     def get_customs_clearance_summary(self, weeks_ahead=4):
         """Get summary of customs clearance deliveries (EPE + Foreign)"""
         try:
@@ -771,6 +828,7 @@ class DeliveryDataLoader:
                 product_id,
                 pt_code,
                 package_size,
+                brand,
                 standard_quantity,
                 selling_quantity,
                 uom_conversion,
@@ -990,6 +1048,7 @@ class DeliveryDataLoader:
                 product_id,
                 pt_code,
                 package_size,
+                brand,
                 standard_quantity,
                 selling_quantity,
                 uom_conversion,
@@ -1068,6 +1127,7 @@ class DeliveryDataLoader:
                 product_id,
                 pt_code,
                 package_size,
+                brand,
                 standard_quantity,
                 selling_quantity,
                 uom_conversion,
@@ -1141,6 +1201,7 @@ class DeliveryDataLoader:
                 product_id,
                 pt_code,
                 package_size,
+                brand,
                 standard_quantity,
                 selling_quantity,
                 uom_conversion,

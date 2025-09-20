@@ -26,7 +26,6 @@ data_loader = DeliveryDataLoader()
 
 st.title("📊 Delivery Schedule")
 
-
 # Get filter options
 filter_options = data_loader.get_filter_options()
 
@@ -58,44 +57,85 @@ with st.expander("🔍 Filters", expanded=True):
             help=f"Available data from {min_date} to {max_date}"
         )
 
-        # Legal Entity filter
-        selected_legal_entities = st.multiselect(
-            "Legal Entity",
-            options=filter_options.get('legal_entities', []),
-            default=None,
-            placeholder="All legal entities",
-            help="Filter by selling company/legal entity"
-        )
+        # Legal Entity filter with exclude option
+        st.markdown("**Legal Entity**")
+        col1_1, col1_2 = st.columns([5, 1])
+        with col1_1:
+            selected_legal_entities = st.multiselect(
+                "Select Legal Entities",
+                options=filter_options.get('legal_entities', []),
+                default=None,
+                placeholder="All legal entities",
+                help="Filter by selling company/legal entity",
+                label_visibility="collapsed"
+            )
+        with col1_2:
+            exclude_legal_entities = st.checkbox(
+                "Excl",
+                key="exclude_legal_entities",
+                help="Exclude selected legal entities instead of including them"
+            )
 
     with col2:
-        # Creator filter
-        selected_creators = st.multiselect(
-            "Creator/Sales",
-            options=filter_options.get('creators', []),
-            default=None,
-            placeholder="All creators"
-        )
+        # Creator filter with exclude option
+        st.markdown("**Creator/Sales**")
+        col2_1, col2_2 = st.columns([5, 1])
+        with col2_1:
+            selected_creators = st.multiselect(
+                "Select Creators",
+                options=filter_options.get('creators', []),
+                default=None,
+                placeholder="All creators",
+                label_visibility="collapsed"
+            )
+        with col2_2:
+            exclude_creators = st.checkbox(
+                "Excl",
+                key="exclude_creators",
+                help="Exclude selected creators instead of including them"
+            )
         
-        # Customer filter
-        selected_customers = st.multiselect(
-            "Customer (Sold-To)",
-            options=filter_options.get('customers', []),
-            default=None,
-            placeholder="All customers"
-        )
+        # Customer filter with exclude option
+        st.markdown("**Customer (Sold-To)**")
+        col2_3, col2_4 = st.columns([5, 1])
+        with col2_3:
+            selected_customers = st.multiselect(
+                "Select Customers",
+                options=filter_options.get('customers', []),
+                default=None,
+                placeholder="All customers",
+                label_visibility="collapsed"
+            )
+        with col2_4:
+            exclude_customers = st.checkbox(
+                "Excl",
+                key="exclude_customers",
+                help="Exclude selected customers instead of including them"
+            )
     
     with col3:
-        # Ship-to filter
-        selected_ship_to = st.multiselect(
-            "Ship-To Company",
-            options=filter_options.get('ship_to_companies', []),
-            default=None,
-            placeholder="All ship-to companies"
-        )
-        
-        # Location filter
-        col3_1, col3_2 = st.columns(2)
+        # Ship-to filter with exclude option
+        st.markdown("**Ship-To Company**")
+        col3_1, col3_2 = st.columns([5, 1])
         with col3_1:
+            selected_ship_to = st.multiselect(
+                "Select Ship-To",
+                options=filter_options.get('ship_to_companies', []),
+                default=None,
+                placeholder="All ship-to companies",
+                label_visibility="collapsed"
+            )
+        with col3_2:
+            exclude_ship_to = st.checkbox(
+                "Excl",
+                key="exclude_ship_to",
+                help="Exclude selected ship-to companies instead of including them"
+            )
+        
+        # Location filter with exclude options
+        st.markdown("**Location Filters**")
+        col3_3, col3_4, col3_5 = st.columns([2, 2, 1])
+        with col3_3:
             selected_states = st.multiselect(
                 "State/Province",
                 options=filter_options.get('states', []),
@@ -103,12 +143,19 @@ with st.expander("🔍 Filters", expanded=True):
                 placeholder="All states"
             )
         
-        with col3_2:
+        with col3_4:
             selected_countries = st.multiselect(
                 "Country",
                 options=filter_options.get('countries', []),
                 default=None,
                 placeholder="All countries"
+            )
+        
+        with col3_5:
+            exclude_countries = st.checkbox(
+                "Excl",
+                key="exclude_countries",
+                help="Exclude selected countries"
             )
 
     # Second row of filters
@@ -137,15 +184,25 @@ with st.expander("🔍 Filters", expanded=True):
             )
 
     with col5:
-        # Product filter - NOW DYNAMIC
-        product_options = filter_options.get('products', [])
-        selected_products = st.multiselect(
-            "Product",
-            options=product_options,
-            default=None,
-            placeholder="All products",
-            help="Filter by product PT Code or Product PN"
-        )
+        # Product filter with exclude option - NOW DYNAMIC
+        st.markdown("**Product**")
+        col5_1, col5_2 = st.columns([5, 1])
+        with col5_1:
+            product_options = filter_options.get('products', [])
+            selected_products = st.multiselect(
+                "Select Products",
+                options=product_options,
+                default=None,
+                placeholder="All products",
+                help="Filter by product PT Code or Product PN",
+                label_visibility="collapsed"
+            )
+        with col5_2:
+            exclude_products = st.checkbox(
+                "Excl",
+                key="exclude_products",
+                help="Exclude selected products instead of including them"
+            )
         
         # If products are selected, extract pt_codes
         if selected_products:
@@ -153,35 +210,82 @@ with st.expander("🔍 Filters", expanded=True):
             st.session_state.selected_pt_codes = pt_codes
         else:
             st.session_state.selected_pt_codes = None
+        
+        # Brand filter with exclude option (NEW POSITION)
+        st.markdown("**Brand**")
+        col5_3, col5_4 = st.columns([5, 1])
+        with col5_3:
+            brand_options = filter_options.get('brands', [])
+            selected_brands = st.multiselect(
+                "Select Brands",
+                options=brand_options,
+                default=None,
+                placeholder="All brands",
+                help="Filter by product brand",
+                label_visibility="collapsed"
+            )
+        with col5_4:
+            exclude_brands = st.checkbox(
+                "Excl",
+                key="exclude_brands",
+                help="Exclude selected brands instead of including them"
+            )
 
     with col6:
-        # Timeline status filter
-        selected_timeline = st.multiselect(
-            "Delivery Timeline Status",
-            options=filter_options.get('timeline_statuses', []),
-            default=None,
-            placeholder="All statuses",
-            help="Filter by delivery timeline: Overdue, Due Today, On Schedule, Completed"
-        )
+        # Timeline status filter with exclude option (now takes full column)
+        st.markdown("**Delivery Timeline Status**")
+        col6_1, col6_2 = st.columns([5, 1])
+        with col6_1:
+            # Get timeline status options
+            timeline_options = filter_options.get('timeline_statuses', [])
+            # Set default to "Completed" if it exists in options
+            default_timeline = ["Completed"] if "Completed" in timeline_options else None
+
+            selected_timeline = st.multiselect(
+                "Select Timeline Status",
+                options=timeline_options,
+                default=default_timeline,
+                placeholder="All statuses",
+                help="Filter by delivery timeline: Overdue, Due Today, On Schedule, Completed",
+                label_visibility="collapsed"
+            )
+        with col6_2:
+            exclude_timeline = st.checkbox(
+                "Excl",
+                key="exclude_timeline",
+                value=True,  # Set default to checked (exclude mode)
+                help="Exclude selected timeline statuses instead of including them"
+            )
 
 # Apply filters button
 if st.button("🔄 Apply Filters", type="primary", use_container_width=True):
     st.session_state.filters_applied = True
 
-# Prepare filters
+# Prepare filters with exclude options
 filters = {
     'date_from': date_range[0] if len(date_range) >= 1 else None,
     'date_to': date_range[1] if len(date_range) >= 2 else date_range[0],
     'creators': selected_creators if selected_creators else None,
+    'exclude_creators': exclude_creators,
     'customers': selected_customers if selected_customers else None,
+    'exclude_customers': exclude_customers,
     'products': selected_products if selected_products else None,
+    'exclude_products': exclude_products,
+    'brands': selected_brands if selected_brands else None,
+    'exclude_brands': exclude_brands,
     'ship_to_companies': selected_ship_to if selected_ship_to else None,
+    'exclude_ship_to_companies': exclude_ship_to,
     'states': selected_states if selected_states else None,
     'countries': selected_countries if selected_countries else None,
+    'exclude_countries': exclude_countries,
     'epe_filter': epe_filter,
     'foreign_filter': foreign_filter,
     'timeline_status': selected_timeline if selected_timeline else None,
-    'legal_entities': selected_legal_entities if selected_legal_entities else None
+    'exclude_timeline_status': exclude_timeline,
+    'legal_entities': selected_legal_entities if selected_legal_entities else None,
+    'exclude_legal_entities': exclude_legal_entities,
+    'statuses': None,  # Add if you have status filter
+    'exclude_statuses': False  # Add if you have status filter
 }
 
 # Load data
@@ -232,11 +336,8 @@ if df is not None and not df.empty:
             total_gap = df.groupby('product_id')['product_gap_quantity'].first().sum()
             st.metric("Total Product Gap", f"{abs(total_gap):,.0f}")
     
-    # st.markdown("---")
-    
-
     # Create tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Pivot Table", "📈 Charts", "📋 Detailed List", "🔍 Product Analysis"])
+    tab1, tab2, tab3 = st.tabs(["📊 Pivot Table",  "📋 Detailed List", "🔍 Product Analysis"])
 
     with tab1:
         st.subheader("📊 Pivot Table View")
@@ -301,72 +402,12 @@ if df is not None and not df.empty:
             st.info("No data available for pivot view")
 
     with tab2:
-        # Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Timeline chart with status breakdown
-            timeline_df = df.groupby([pd.to_datetime(df['etd']).dt.date, 'delivery_timeline_status']).agg({
-                'delivery_id': 'nunique'
-            }).reset_index()
-            timeline_df.columns = ['Date', 'Status', 'Count']
-            
-            fig1 = px.bar(
-                timeline_df,
-                x='Date',
-                y='Count',
-                color='Status',
-                title='Delivery Timeline Status',
-                color_discrete_map={
-                    'Completed': '#2ecc71',
-                    'On Schedule': '#3498db',
-                    'Due Today': '#f39c12',
-                    'Overdue': '#e74c3c',
-                    'No ETD': '#95a5a6'
-                }
-            )
-            st.plotly_chart(fig1, use_container_width=True)
-        
-        with col2:
-            # Product fulfillment status distribution
-            fulfillment_df = df.groupby('product_fulfillment_status')['product_id'].nunique().reset_index()
-            fulfillment_df.columns = ['Status', 'Product Count']
-            
-            fig2 = px.pie(
-                fulfillment_df, 
-                values='Product Count', 
-                names='Status',
-                title='Product Fulfillment Status',
-                color_discrete_map={
-                    'Can Fulfill All': '#2ecc71',
-                    'Can Fulfill Partial': '#f39c12',
-                    'Out of Stock': '#e74c3c',
-                    'Ready to Ship': '#3498db',
-                    'Delivered': '#95a5a6'
-                }
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-        
-        # Days overdue distribution (NEW)
-        overdue_df = df[df['days_overdue'].notna()].copy()
-        if not overdue_df.empty:
-            fig3 = px.histogram(
-                overdue_df,
-                x='days_overdue',
-                nbins=20,
-                title='Distribution of Overdue Days',
-                labels={'days_overdue': 'Days Overdue', 'count': 'Number of Deliveries'}
-            )
-            fig3.update_traces(marker_color='#e74c3c')
-            st.plotly_chart(fig3, use_container_width=True)
-    
-    with tab3:
         # Detailed list
         st.subheader("📋 Detailed Delivery List")
         
-        # Select columns to display - Updated with new fields
+        # Select columns to display - Updated with brand field
         default_columns = ['dn_number', 'customer', 'recipient_company', 'etd', 
-                            'pt_code', 'product_pn', 'standard_quantity', 'remaining_quantity_to_deliver',
+                            'pt_code', 'product_pn', 'brand', 'standard_quantity', 'remaining_quantity_to_deliver',
                             'product_fulfill_rate_percent', 'delivery_timeline_status',
                             'days_overdue', 'shipment_status_vn', 'product_fulfillment_status', 
                             'is_epe_company']
@@ -489,7 +530,7 @@ if df is not None and not df.empty:
             
             st.dataframe(styled_df, use_container_width=True)
     
-    with tab4:
+    with tab3:
         # Product Analysis tab - Focus on unique product insights
         st.subheader("🔍 Product Demand Analysis")
         
@@ -637,8 +678,11 @@ if df is not None and not df.empty:
                     # Main metric is gap quantity
                     chart_data = top_shortage.copy()
                     
-                    # Create product label with PT code and PN
-                    chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:30]
+                    # Create product label with PT code, PN, and Brand
+                    if 'brand' in chart_data.columns:
+                        chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:25] + '<br><i>' + chart_data['brand'].fillna('No Brand') + '</i>'
+                    else:
+                        chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:30]
                     
                     # Determine which metric to display on X-axis based on sort
                     if sort_column == 'gap_percentage' and 'gap_percentage' in chart_data.columns:
@@ -661,8 +705,14 @@ if df is not None and not df.empty:
                     ]
                     customdata_cols = ['pt_code', 'product_pn']
                     
-                    # Always show key metrics
+                    # Add brand if available
                     idx = 2
+                    if 'brand' in chart_data.columns:
+                        hover_parts.append(f'Brand: %{{customdata[{idx}]}}')
+                        customdata_cols.append('brand')
+                        idx += 1
+                    
+                    # Always show key metrics
                     if 'gap_quantity' in chart_data.columns:
                         hover_parts.append(f'Gap Quantity: %{{customdata[{idx}]:,.0f}}')
                         customdata_cols.append('gap_quantity')
@@ -747,9 +797,9 @@ if df is not None and not df.empty:
                         title=f'Top {len(top_shortage)} Products by {sort_display}',
                         xaxis_title=x_title,
                         yaxis_title='',
-                        height=max(400, len(top_shortage) * 40),  # Dynamic height
+                        height=max(400, len(top_shortage) * 50),  # Slightly more height for brand info
                         showlegend=False,
-                        margin=dict(l=200),  # More space for product labels
+                        margin=dict(l=250),  # More space for product labels with brand
                         plot_bgcolor='white',
                         xaxis=dict(
                             gridcolor='lightgray',
@@ -801,7 +851,12 @@ if df is not None and not df.empty:
                     st.info("Gap quantity data not available. Showing products by total demand.")
                     
                     chart_data = top_shortage.copy()
-                    chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:30]
+                    
+                    # Create label with brand if available
+                    if 'brand' in chart_data.columns:
+                        chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:25] + '<br><i>' + chart_data['brand'].fillna('No Brand') + '</i>'
+                    else:
+                        chart_data['product_label'] = chart_data['pt_code'] + '<br>' + chart_data['product_pn'].str[:30]
                     
                     # Build dynamic hover template
                     hover_parts = [
@@ -812,6 +867,11 @@ if df is not None and not df.empty:
                     customdata_cols = ['pt_code', 'product_pn']
                     
                     idx = 2
+                    if 'brand' in chart_data.columns:
+                        hover_parts.insert(2, f'Brand: %{{customdata[{idx}]}}')
+                        customdata_cols.append('brand')
+                        idx += 1
+                    
                     if 'active_deliveries' in chart_data.columns:
                         hover_parts.append(f'Active Deliveries: %{{customdata[{idx}]}}')
                         customdata_cols.append('active_deliveries')
@@ -843,9 +903,9 @@ if df is not None and not df.empty:
                         title=f'Top {len(top_shortage)} Products by Total Demand',
                         xaxis_title='Total Remaining Demand',
                         yaxis_title='',
-                        height=max(400, len(top_shortage) * 40),
+                        height=max(400, len(top_shortage) * 50),
                         showlegend=False,
-                        margin=dict(l=200),
+                        margin=dict(l=250),
                         plot_bgcolor='white',
                         xaxis=dict(
                             gridcolor='lightgray',
@@ -890,7 +950,7 @@ if df is not None and not df.empty:
             if not table_data.empty:
                 # Select columns for display - dynamically build based on available columns
                 possible_columns = [
-                    'pt_code', 'product_pn', 'active_deliveries', 'unique_orders',
+                    'pt_code', 'product_pn', 'brand', 'active_deliveries', 'unique_orders',
                     'total_remaining_demand', 'total_inventory', 'preferred_warehouse_inventory',
                     'gap_quantity', 'gap_percentage', 'fulfill_rate', 
                     'fulfillment_status', 'warehouse_count', 'avg_demand_percentage'
@@ -898,7 +958,7 @@ if df is not None and not df.empty:
                 
                 # Default columns - only include those that exist
                 default_columns = [
-                    'pt_code', 'product_pn', 'active_deliveries', 
+                    'pt_code', 'product_pn', 'brand', 'active_deliveries', 
                     'total_remaining_demand', 'total_inventory',
                     'gap_quantity', 'gap_percentage', 'fulfill_rate', 
                     'fulfillment_status', 'warehouse_count'
@@ -999,6 +1059,8 @@ if df is not None and not df.empty:
                 with st.expander("🎯 Top Customers for Critical Products", expanded=False):
                     # Build columns list dynamically
                     customer_columns = ['pt_code', 'product_pn']
+                    if 'brand' in table_data.columns:
+                        customer_columns.append('brand')
                     if 'gap_quantity' in table_data.columns:
                         customer_columns.append('gap_quantity')
                     if 'fulfill_rate' in table_data.columns:
