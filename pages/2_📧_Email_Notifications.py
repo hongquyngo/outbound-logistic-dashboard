@@ -28,7 +28,7 @@ if not auth_manager.check_session():
 
 # Check user role
 user_role = st.session_state.get('user_role', '')
-if user_role not in ['admin', 'manager', 'logistics_manager']:
+if user_role not in ['admin', 'manager', 'logistics_manager', 'supply_chain']:
     st.error("❌ You don't have permission to access this page")
     st.stop()
 
@@ -483,7 +483,7 @@ with col2:
     st.markdown("#### Additional CC Recipients")
     additional_cc = st.text_area(
         "CC Email addresses (one per line)",
-        placeholder="manager@company.com\nlogistics@company.com",
+        placeholder="outbound@prostech.vn\nsales.managers@prostech.vn",
         height=100
     )
     
