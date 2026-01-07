@@ -42,8 +42,8 @@ def create_filter_section(filter_options):
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Date range filter
-            date_range = create_date_filter(filter_options)
+            # Date range filter - returns (date_from, date_to) tuple
+            date_from, date_to = create_date_filter(filter_options)
             
             # Legal Entity filter
             selected_legal_entities, exclude_legal_entities = create_multiselect_with_exclude(
@@ -108,8 +108,8 @@ def create_filter_section(filter_options):
     
     # Compile filters
     filters = {
-        'date_from': date_range[0] if len(date_range) >= 1 else None,
-        'date_to': date_range[1] if len(date_range) >= 2 else date_range[0],
+        'date_from': date_from,
+        'date_to': date_to,
         'creators': selected_creators if selected_creators else None,
         'exclude_creators': exclude_creators,
         'customers': selected_customers if selected_customers else None,
@@ -136,28 +136,110 @@ def create_filter_section(filter_options):
     return filters
 
 def create_date_filter(filter_options):
-    """Create date range filter"""
+    """Create improved date range filter with separate inputs and presets"""
     date_range_options = filter_options.get('date_range', {})
-    min_date = date_range_options.get('min_date', datetime.now().date() - timedelta(days=365))
-    max_date = date_range_options.get('max_date', datetime.now().date() + timedelta(days=365))
+    today = datetime.now().date()
     
-    # Convert to date if datetime
-    if hasattr(min_date, 'date'):
-        min_date = min_date.date()
-    if hasattr(max_date, 'date'):
-        max_date = max_date.date()
+    # Get actual data range from database
+    data_min = date_range_options.get('min_date', today - timedelta(days=365))
+    data_max = date_range_options.get('max_date', today + timedelta(days=365))
     
-    # Set default date range
-    default_start = min_date if min_date else datetime.now().date() - timedelta(days=365)
-    default_end = max_date if max_date else datetime.now().date() + timedelta(days=365)
+    # Convert datetime to date if needed
+    if hasattr(data_min, 'date'):
+        data_min = data_min.date()
+    if hasattr(data_max, 'date'):
+        data_max = data_max.date()
     
-    return st.date_input(
-        "Date Range",
-        value=(default_start, default_end),
-        min_value=min_date,
-        max_value=max_date,
-        help=f"Available data from {min_date} to {max_date}"
-    )
+    # Ensure data_min <= data_max
+    if data_min > data_max:
+        data_min, data_max = data_max, data_min
+    
+    # Extend range for easier calendar navigation
+    # This allows selecting any month/year without restrictions
+    extended_min = data_min.replace(month=1, day=1)
+    extended_max = data_max.replace(month=12, day=31)
+    
+    # Initialize session state for dates if not exists
+    if 'filter_date_from' not in st.session_state:
+        st.session_state.filter_date_from = data_min
+    if 'filter_date_to' not in st.session_state:
+        st.session_state.filter_date_to = data_max
+    
+    st.markdown("**📅 Date Range**")
+    
+    # Preset buttons row
+    preset_cols = st.columns(5)
+    
+    with preset_cols[0]:
+        if st.button("This Week", use_container_width=True, key="preset_this_week"):
+            week_start = today - timedelta(days=today.weekday())
+            week_end = week_start + timedelta(days=6)
+            st.session_state.filter_date_from = max(week_start, data_min)
+            st.session_state.filter_date_to = min(week_end, data_max)
+            st.rerun()
+    
+    with preset_cols[1]:
+        if st.button("This Month", use_container_width=True, key="preset_this_month"):
+            month_start = today.replace(day=1)
+            # Get last day of month
+            next_month = today.replace(day=28) + timedelta(days=4)
+            month_end = next_month - timedelta(days=next_month.day)
+            st.session_state.filter_date_from = max(month_start, data_min)
+            st.session_state.filter_date_to = min(month_end, data_max)
+            st.rerun()
+    
+    with preset_cols[2]:
+        if st.button("Next 30 Days", use_container_width=True, key="preset_30_days"):
+            st.session_state.filter_date_from = max(today, data_min)
+            st.session_state.filter_date_to = min(today + timedelta(days=30), data_max)
+            st.rerun()
+    
+    with preset_cols[3]:
+        if st.button("Next 90 Days", use_container_width=True, key="preset_90_days"):
+            st.session_state.filter_date_from = max(today, data_min)
+            st.session_state.filter_date_to = min(today + timedelta(days=90), data_max)
+            st.rerun()
+    
+    with preset_cols[4]:
+        if st.button("All Data", use_container_width=True, key="preset_all_data"):
+            st.session_state.filter_date_from = data_min
+            st.session_state.filter_date_to = data_max
+            st.rerun()
+    
+    # Two separate date inputs - clear labels
+    date_cols = st.columns(2)
+    
+    with date_cols[0]:
+        date_from = st.date_input(
+            "📆 From Date",
+            value=st.session_state.filter_date_from,
+            min_value=extended_min,
+            max_value=extended_max,
+            key="input_date_from"
+        )
+    
+    with date_cols[1]:
+        date_to = st.date_input(
+            "📆 To Date",
+            value=st.session_state.filter_date_to,
+            min_value=extended_min,
+            max_value=extended_max,
+            key="input_date_to"
+        )
+    
+    # Update session state
+    st.session_state.filter_date_from = date_from
+    st.session_state.filter_date_to = date_to
+    
+    # Validation with auto-swap
+    if date_from > date_to:
+        st.warning("⚠️ 'From Date' > 'To Date'. Dates will be automatically swapped.")
+        date_from, date_to = date_to, date_from
+    
+    # Show data availability hint
+    st.caption(f"💡 Data available: **{data_min.strftime('%Y/%m/%d')}** → **{data_max.strftime('%Y/%m/%d')}**")
+    
+    return date_from, date_to
 
 def create_multiselect_with_exclude(label, options, key_prefix, help_text=None):
     """Create a multiselect with exclude checkbox"""
