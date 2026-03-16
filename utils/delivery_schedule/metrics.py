@@ -5,7 +5,7 @@ Consolidated into one meaningful set — no expander, no duplicates.
 Chosen metrics:
   1. Total Deliveries (unique DN)         — from filtered data
   2. Total Line Items                     — from filtered data
-  3. Remaining Qty to Deliver             — from filtered data
+  3. Pending Qty (stock-out remaining)   — from filtered data
   4. Overdue Deliveries (⚠️ GLOBAL)       — from ALL active data, ignores filters
   5. Avg Fulfillment Rate (overall health)— from filtered data
   6. Out-of-Stock Products (action needed)— from filtered data
@@ -42,7 +42,7 @@ def display_metrics(df, df_all_active=None):
 
     with c3:
         remaining = df['remaining_quantity_to_deliver'].sum()
-        st.metric("Remaining Qty", f"{remaining:,.0f}")
+        st.metric("Pending Qty", f"{remaining:,.0f}")
 
     with c4:
         overdue_df = overdue_source[overdue_source['delivery_timeline_status'] == 'Overdue']
@@ -72,14 +72,14 @@ def _render_overdue_popover(overdue_df):
             .agg(
                 Deliveries=('delivery_id', 'nunique'),
                 Max_Days_Overdue=('days_overdue', 'max'),
-                Total_Qty=('remaining_quantity_to_deliver', 'sum'),
+                Pending_Qty=('remaining_quantity_to_deliver', 'sum'),
             )
             .reset_index()
             .rename(columns={
                 'customer': 'Customer',
                 'recipient_company': 'Ship To',
                 'Max_Days_Overdue': 'Max Days Overdue',
-                'Total_Qty': 'Total Qty',
+                'Pending_Qty': 'Pending Qty',
             })
             .sort_values('Max Days Overdue', ascending=False)
         )
@@ -87,12 +87,12 @@ def _render_overdue_popover(overdue_df):
         st.dataframe(
             summary.style
             .format({
-                'Total Qty': '{:,.0f}',
+                'Pending Qty': '{:,.0f}',
                 'Max Days Overdue': '{:.0f} days',
                 'Deliveries': '{:,.0f}',
             }, na_rep='-')
             .background_gradient(subset=['Max Days Overdue'], cmap='Reds')
-            .bar(subset=['Total Qty'], color='#ff6b6b'),
+            .bar(subset=['Pending Qty'], color='#ff6b6b'),
             use_container_width=True,
             hide_index=True,
         )
@@ -113,7 +113,7 @@ def _render_oos_popover(oos_df):
             In_Stock_Pref=('total_instock_at_preferred_warehouse', 'max'),
             In_Stock_All=('total_instock_all_warehouses', 'max'),
             Gap_Qty=('product_gap_quantity', 'min'),
-            Remaining_Qty=('remaining_quantity_to_deliver', 'sum'),
+            Pending_Qty=('remaining_quantity_to_deliver', 'sum'),
         )
         # Keep only aggs whose source column exists
         agg_dict = {k: v for k, v in agg_dict.items() if v[0] in oos_df.columns}
@@ -137,9 +137,9 @@ def _render_oos_popover(oos_df):
                 'In_Stock_Pref': 'In-Stock (Pref WH)',
                 'In_Stock_All': 'In-Stock (All WH)',
                 'Gap_Qty': 'Gap Qty',
-                'Remaining_Qty': 'Remaining Qty',
+                'Pending_Qty': 'Pending Qty',
             })
-            .sort_values('Remaining Qty', ascending=False)
+            .sort_values('Pending Qty', ascending=False)
         )
 
         qty_fmt = {c: '{:,.0f}' for c in product_summary.columns
@@ -148,7 +148,7 @@ def _render_oos_popover(oos_df):
         st.dataframe(
             product_summary.style
             .format(qty_fmt, na_rep='-')
-            .bar(subset=[c for c in ['Remaining Qty', 'Total Demand'] if c in product_summary.columns],
+            .bar(subset=[c for c in ['Pending Qty', 'Total Demand'] if c in product_summary.columns],
                  color='#ff9999')
             .bar(subset=[c for c in ['In-Stock (Pref WH)', 'In-Stock (All WH)'] if c in product_summary.columns],
                  color='#90ee90'),
@@ -162,7 +162,8 @@ def _render_oos_popover(oos_df):
         detail_cols = [
             'dn_number', 'customer', 'recipient_company',
             'pt_code', 'product_pn', 'brand', 'etd',
-            'standard_quantity', 'remaining_quantity_to_deliver',
+            'stock_out_request_quantity', 'stock_out_quantity',
+            'remaining_quantity_to_deliver',
             'product_total_remaining_demand',
             'total_instock_at_preferred_warehouse',
             'total_instock_all_warehouses',
@@ -184,8 +185,9 @@ def _render_oos_popover(oos_df):
                 'product_pn': 'Product',
                 'brand': 'Brand',
                 'etd': 'ETD',
-                'standard_quantity': 'Std Qty',
-                'remaining_quantity_to_deliver': 'Remaining Qty',
+                'stock_out_request_quantity': 'Requested Qty',
+                'stock_out_quantity': 'Issued Qty',
+                'remaining_quantity_to_deliver': 'Pending Qty',
                 'product_total_remaining_demand': 'Total Demand',
                 'total_instock_at_preferred_warehouse': 'In-Stock (Pref WH)',
                 'total_instock_all_warehouses': 'In-Stock (All WH)',

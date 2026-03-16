@@ -20,17 +20,17 @@ def display_overdue_alert(df):
             'days_overdue': 'max',
             'remaining_quantity_to_deliver': 'sum'
         }).reset_index()
-        overdue_summary.columns = ['Customer', 'Ship To', 'Deliveries', 'Max Days Overdue', 'Total Qty']
+        overdue_summary.columns = ['Customer', 'Ship To', 'Deliveries', 'Max Days Overdue', 'Pending Qty']
 
         st.dataframe(
             overdue_summary.style.format({
-                'Total Qty': '{:,.0f}',
+                'Pending Qty': '{:,.0f}',
                 'Max Days Overdue': '{:.0f} days',
                 'Deliveries': '{:,.0f}'
             }, na_rep='-').background_gradient(
                 subset=['Max Days Overdue'], cmap='Reds'
             ).bar(
-                subset=['Total Qty'], color='#ff6b6b'
+                subset=['Pending Qty'], color='#ff6b6b'
             ),
             width="stretch"
         )

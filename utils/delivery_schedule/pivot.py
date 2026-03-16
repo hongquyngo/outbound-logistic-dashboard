@@ -27,13 +27,16 @@ ROW_COLUMN_OPTIONS = {
 }
 
 VALUE_OPTIONS = {
-    "Std Quantity":           ("standard_quantity",                "sum"),
-    "Remaining Qty":          ("remaining_quantity_to_deliver",    "sum"),
-    "Selling Qty":            ("selling_quantity",                 "sum"),
-    "Gap Qty":                ("gap_quantity",                     "sum"),
-    "Product Gap Qty":        ("product_gap_quantity",             "sum"),
-    "Delivery Count":         ("delivery_id",                     "nunique"),
-    "Avg Fulfill %":          ("product_fulfill_rate_percent",    "mean"),
+    "Requested Qty":          ("stock_out_request_quantity",         "sum"),
+    "Issued Qty":             ("stock_out_quantity",                 "sum"),
+    "Pending Qty":            ("remaining_quantity_to_deliver",      "sum"),
+    "Std Quantity":           ("standard_quantity",                  "sum"),
+    "Selling Qty":            ("selling_quantity",                   "sum"),
+    "Gap Qty":                ("gap_quantity",                       "sum"),
+    "Product Gap Qty":        ("product_gap_quantity",               "sum"),
+    "Delivery Count":         ("delivery_id",                       "nunique"),
+    "Avg Fulfill %":          ("product_fulfill_rate_percent",      "mean"),
+    "Avg Issued %":           ("stock_out_progress",                "mean"),
 }
 
 AGG_OPTIONS = ["sum", "mean", "count", "nunique", "min", "max"]

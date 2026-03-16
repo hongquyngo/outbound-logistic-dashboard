@@ -45,6 +45,7 @@ _LINE_LEVEL_COLS = [
     'fulfill_rate_percent',
     'fulfillment_status',
     'delivery_demand_percentage',
+    'stock_out_progress',
 ]
 
 
@@ -170,6 +171,15 @@ def calculate_fulfillment(
     df['delivery_demand_percentage'] = np.where(
         df['product_total_remaining_demand'] > 0,
         (remaining / df['product_total_remaining_demand'] * 100).round(2),
+        0.0,
+    )
+
+    # Stock-out progress: how much of the request has been issued
+    req_qty = df['stock_out_request_quantity'].fillna(0)
+    issued_qty = df['stock_out_quantity'].fillna(0)
+    df['stock_out_progress'] = np.where(
+        req_qty > 0,
+        (issued_qty / req_qty * 100).round(1),
         0.0,
     )
 

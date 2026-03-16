@@ -43,9 +43,10 @@ COLUMN_LABELS = {
     'package_size':                       'Package Size',
     'standard_quantity':                  'Std Qty',
     'selling_quantity':                   'Selling Qty',
-    'remaining_quantity_to_deliver':      'Remaining Qty',
-    'stock_out_quantity':                 'Stock Out Qty',
-    'stock_out_request_quantity':         'Stock Out Request Qty',
+    'stock_out_request_quantity':         'Requested Qty',
+    'stock_out_quantity':                 'Issued Qty',
+    'remaining_quantity_to_deliver':      'Pending Qty',
+    'stock_out_progress':                 'Issued %',
     'total_instock_at_preferred_warehouse': 'In-Stock (Preferred WH)',
     'total_instock_all_warehouses':       'In-Stock (All WH)',
     'gap_quantity':                       'Gap Qty',
@@ -74,8 +75,10 @@ COLUMN_LABELS = {
 # Columns visible by default (order matters)
 DEFAULT_COLUMNS = [
     'dn_number', 'customer', 'recipient_company', 'etd',
-    'pt_code', 'product_pn', 'brand', 'standard_quantity',
-    'remaining_quantity_to_deliver', 'product_fulfill_rate_percent',
+    'pt_code', 'product_pn', 'brand',
+    'stock_out_request_quantity', 'stock_out_quantity',
+    'remaining_quantity_to_deliver', 'stock_out_progress',
+    'product_fulfill_rate_percent',
     'delivery_timeline_status', 'days_overdue', 'shipment_status',
     'product_fulfillment_status', 'is_epe_company',
 ]
@@ -482,6 +485,7 @@ def _show_affected_lines(affected_df):
     show_cols = [
         'dn_number', 'customer', 'recipient_company', 'etd',
         'pt_code', 'product_pn', 'brand',
+        'stock_out_request_quantity', 'stock_out_quantity',
         'remaining_quantity_to_deliver', 'delivery_timeline_status',
     ]
     show_cols = [c for c in show_cols if c in affected_df.columns]
@@ -630,7 +634,7 @@ def _build_column_config(df, etd_editable=False):
     }
     rate_cols = {
         'product_fulfill_rate_percent', 'fulfill_rate_percent',
-        'delivery_demand_percentage',
+        'delivery_demand_percentage', 'stock_out_progress',
     }
     currency_cols = {'shipping_cost', 'export_tax'}
 

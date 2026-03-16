@@ -267,7 +267,7 @@ def _render_creator_selection(data_loader, notification_type, weeks_ahead):
         else:
             disp = sel_df[['name', 'email', 'active_deliveries', 'total_quantity']].copy()
             disp['total_quantity'] = disp['total_quantity'].apply(lambda x: f"{x:,.0f}")
-            disp.columns = ['Name', 'Email', 'Deliveries', 'Quantity']
+            disp.columns = ['Name', 'Email', 'Deliveries', 'Pending Qty']
         st.dataframe(disp, width="stretch", hide_index=True)
 
     return sales_df, selected
@@ -374,7 +374,7 @@ def _render_preview(data_loader, notif_type, recip_type,
                           if 'customs_type' in df.columns else "–")
                 c2.metric("Foreign", df[df.get('customs_type', pd.Series()) == 'Foreign']['delivery_id'].nunique()
                           if 'customs_type' in df.columns else "–")
-                c3.metric("Quantity", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
+                c3.metric("Pending Qty", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
 
             elif recip_type == "customers" and contacts:
                 ct = contacts[0]
@@ -385,7 +385,7 @@ def _render_preview(data_loader, notif_type, recip_type,
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Deliveries", df['delivery_id'].nunique())
                 c2.metric("Products", df['product_pn'].nunique())
-                c3.metric("Quantity", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
+                c3.metric("Pending Qty", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
 
             elif recip_type == "creators" and selected:
                 name = selected[0]
@@ -398,7 +398,7 @@ def _render_preview(data_loader, notif_type, recip_type,
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Deliveries", df['delivery_id'].nunique())
                 c2.metric("Customers", df['customer'].nunique())
-                c3.metric("Quantity", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
+                c3.metric("Pending Qty", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
 
             elif recip_type == "custom" and custom:
                 df = data_loader.get_all_deliveries_summary(weeks)
@@ -407,7 +407,7 @@ def _render_preview(data_loader, notif_type, recip_type,
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Deliveries", df['delivery_id'].nunique())
                 c2.metric("Customers", df['customer'].nunique())
-                c3.metric("Quantity", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
+                c3.metric("Pending Qty", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
 
         except Exception as e:
             st.error(f"Preview error: {e}")
