@@ -3,20 +3,35 @@
 
 Consolidated into one meaningful set — no expander, no duplicates.
 Chosen metrics:
-  1. Total Deliveries (unique DN)
-  2. Total Line Items
-  3. Remaining Qty to Deliver
-  4. Overdue Deliveries (attention-grabber) + popover detail
-  5. Avg Fulfillment Rate (overall health)
-  6. Out-of-Stock Products (action needed)
+  1. Total Deliveries (unique DN)         — from filtered data
+  2. Total Line Items                     — from filtered data
+  3. Remaining Qty to Deliver             — from filtered data
+  4. Overdue Deliveries (⚠️ GLOBAL)       — from ALL active data, ignores filters
+  5. Avg Fulfillment Rate (overall health)— from filtered data
+  6. Out-of-Stock Products (action needed)— from filtered data
 """
 
 import streamlit as st
 import pandas as pd
 
 
-def display_metrics(df):
-    """Display a single row of key delivery metrics."""
+def display_metrics(df, df_all_active=None):
+    """Display a single row of key delivery metrics.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Filtered data — used for most KPIs.
+    df_all_active : DataFrame, optional
+        ALL active (non-completed) deliveries, unfiltered.
+        Used exclusively for the Overdue metric so it always
+        reflects the true global overdue count regardless of
+        the user's current filter selection.
+        Falls back to *df* when not provided.
+    """
+    # Overdue source: always the full active dataset
+    overdue_source = df_all_active if df_all_active is not None and not df_all_active.empty else df
+
     c1, c2, c3, c4, c5, c6 = st.columns(6)
 
     with c1:
@@ -30,10 +45,10 @@ def display_metrics(df):
         st.metric("Remaining Qty", f"{remaining:,.0f}")
 
     with c4:
-        overdue_df = df[df['delivery_timeline_status'] == 'Overdue']
+        overdue_df = overdue_source[overdue_source['delivery_timeline_status'] == 'Overdue']
         overdue_count = overdue_df['delivery_id'].nunique()
         st.metric(
-            "Overdue",
+            "⚠️ Overdue",
             f"{overdue_count:,}",
             delta=f"{overdue_count} need attention" if overdue_count > 0 else None,
             delta_color="inverse" if overdue_count > 0 else "off",

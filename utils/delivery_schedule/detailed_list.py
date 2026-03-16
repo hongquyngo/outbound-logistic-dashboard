@@ -1,107 +1,144 @@
 # utils/delivery_schedule/detailed_list.py
-"""Detailed delivery list fragment with conditional formatting"""
+"""Detailed delivery list fragment with native column visibility.
+
+Instead of a multiselect widget, we pass ALL columns to st.dataframe
+with proper column_config labels.  Users toggle visibility via the
+native column-header menu (⋮ → Hide column) built into Streamlit's
+dataframe widget.
+
+`column_order` controls the DEFAULT visible set and ordering.
+Columns NOT in `column_order` are hidden but can be re-shown by
+the user via the dataframe toolbar (click ⋮ on any column header).
+"""
 
 import streamlit as st
 import pandas as pd
 
 
+# ── User-friendly column labels ──────────────────────────────────
+
+COLUMN_LABELS = {
+    'dn_number':                          'DN Number',
+    'delivery_id':                        'Delivery ID',
+    'customer':                           'Customer',
+    'recipient_company':                  'Ship-To Company',
+    'recipient_state_province':           'State/Province',
+    'recipient_country_name':             'Country',
+    'etd':                                'ETD',
+    'pt_code':                            'PT Code',
+    'product_pn':                         'Product Name',
+    'product_id':                         'Product ID',
+    'brand':                              'Brand',
+    'package_size':                       'Package Size',
+    'standard_quantity':                  'Std Qty',
+    'selling_quantity':                   'Selling Qty',
+    'remaining_quantity_to_deliver':      'Remaining Qty',
+    'stock_out_quantity':                 'Stock Out Qty',
+    'stock_out_request_quantity':         'Stock Out Request Qty',
+    'total_instock_at_preferred_warehouse': 'In-Stock (Preferred WH)',
+    'total_instock_all_warehouses':       'In-Stock (All WH)',
+    'gap_quantity':                       'Gap Qty',
+    'product_gap_quantity':               'Product Gap Qty',
+    'product_total_remaining_demand':     'Total Remaining Demand',
+    'product_fulfill_rate_percent':       'Fulfill Rate %',
+    'fulfill_rate_percent':               'Line Fulfill %',
+    'delivery_demand_percentage':         'Demand %',
+    'delivery_timeline_status':           'Timeline Status',
+    'days_overdue':                       'Days Overdue',
+    'shipment_status':                    'Shipment Status',
+    'product_fulfillment_status':         'Fulfillment Status',
+    'is_epe_company':                     'EPE Company',
+    'legal_entity':                       'Legal Entity',
+    'created_by_name':                    'Creator/Sales',
+    'created_date':                       'Created Date',
+    'delivered_date':                     'Delivered Date',
+    'dispatched_date':                    'Dispatched Date',
+    'preferred_warehouse':                'Preferred WH',
+    'shipping_cost':                      'Shipping Cost',
+    'export_tax':                         'Export Tax',
+    'customer_country_code':              'Customer Country',
+    'legal_entity_country_code':          'Entity Country',
+}
+
+# Columns visible by default (order matters)
+DEFAULT_COLUMNS = [
+    'dn_number', 'customer', 'recipient_company', 'etd',
+    'pt_code', 'product_pn', 'brand', 'standard_quantity',
+    'remaining_quantity_to_deliver', 'product_fulfill_rate_percent',
+    'delivery_timeline_status', 'days_overdue', 'shipment_status',
+    'product_fulfillment_status', 'is_epe_company',
+]
+
+
 @st.fragment
 def display_detailed_list(df):
-    """Display detailed delivery list"""
+    """Display detailed delivery list with native column visibility."""
     st.subheader("📋 Detailed Delivery List")
 
-    # Column selection
-    default_columns = ['dn_number', 'customer', 'recipient_company', 'etd',
-                       'pt_code', 'product_pn', 'brand', 'standard_quantity',
-                       'remaining_quantity_to_deliver', 'product_fulfill_rate_percent',
-                       'delivery_timeline_status', 'days_overdue', 'shipment_status',
-                       'product_fulfillment_status', 'is_epe_company']
+    display_df = df.copy()
 
-    display_columns = st.multiselect(
-        "Select columns to display",
-        options=df.columns.tolist(),
-        default=[col for col in default_columns if col in df.columns]
-    )
-
-    if not display_columns:
-        st.info("Please select columns to display")
-        return
-
-    display_df = df[display_columns].copy()
-
-    # Format date columns
+    # ── Format date columns to string for display ────────────────
     date_columns = ['etd', 'created_date', 'delivered_date', 'dispatched_date']
     for col in date_columns:
         if col in display_df.columns:
-            display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%Y-%m-%d')
+            display_df[col] = pd.to_datetime(display_df[col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-    styled_df = _style_detailed_list(display_df)
-    st.dataframe(styled_df, width="stretch")
+    # ── Build column_config ──────────────────────────────────────
+    column_config = _build_column_config(display_df)
 
+    # ── Default column order (only existing columns) ─────────────
+    col_order = [c for c in DEFAULT_COLUMNS if c in display_df.columns]
 
-# ── Styling helpers ──────────────────────────────────────────────
-
-def _style_detailed_list(df):
-    """Apply styling to detailed list dataframe"""
-    quantity_columns = ['standard_quantity', 'selling_quantity', 'remaining_quantity_to_deliver',
-                        'stock_out_quantity', 'stock_out_request_quantity',
-                        'total_instock_at_preferred_warehouse', 'total_instock_all_warehouses',
-                        'gap_quantity', 'product_gap_quantity', 'product_total_remaining_demand']
-    rate_columns = ['product_fulfill_rate_percent', 'fulfill_rate_percent', 'delivery_demand_percentage']
-    currency_columns = ['shipping_cost', 'export_tax']
-
-    format_dict = {}
-    for col in quantity_columns:
-        if col in df.columns:
-            format_dict[col] = '{:,.0f}'
-    for col in rate_columns:
-        if col in df.columns:
-            format_dict[col] = '{:.1f}%'
-    for col in currency_columns:
-        if col in df.columns:
-            format_dict[col] = '{:,.2f}'
-    if 'days_overdue' in df.columns:
-        format_dict['days_overdue'] = '{:.0f}'
-
-    styled = df.style.format(format_dict, na_rep='-')
-
-    if 'delivery_timeline_status' in df.columns:
-        styled = styled.map(_highlight_timeline_status, subset=['delivery_timeline_status'])
-    if 'product_fulfillment_status' in df.columns:
-        styled = styled.map(_highlight_fulfillment_status, subset=['product_fulfillment_status'])
-    if 'is_epe_company' in df.columns:
-        styled = styled.map(_highlight_epe_company, subset=['is_epe_company'])
-    for col in rate_columns:
-        if col in df.columns:
-            styled = styled.map(_color_fulfill_rate, subset=[col])
-
-    return styled
+    # ── Render dataframe ─────────────────────────────────────────
+    st.dataframe(
+        display_df,
+        column_order=col_order,
+        column_config=column_config,
+        use_container_width=True,
+        hide_index=True,
+        height=min(700, 50 + len(display_df) * 35),
+    )
 
 
-def _highlight_timeline_status(val):
-    colors = {'Overdue': '#ffcccb', 'Due Today': '#ffe4b5', 'On Schedule': '#90ee90', 'Completed': '#e0e0e0'}
-    return f'background-color: {colors[val]}' if val in colors else ''
+# ── Column config builder ────────────────────────────────────────
 
+def _build_column_config(df):
+    """Build st.column_config dict with proper types, labels, and formats."""
 
-def _highlight_fulfillment_status(val):
-    colors = {'Out of Stock': '#ffcccb', 'Can Fulfill Partial': '#ffe4b5', 'Can Fulfill All': '#90ee90'}
-    return f'background-color: {colors[val]}' if val in colors else ''
+    quantity_cols = {
+        'standard_quantity', 'selling_quantity', 'remaining_quantity_to_deliver',
+        'stock_out_quantity', 'stock_out_request_quantity',
+        'total_instock_at_preferred_warehouse', 'total_instock_all_warehouses',
+        'gap_quantity', 'product_gap_quantity', 'product_total_remaining_demand',
+    }
+    rate_cols = {
+        'product_fulfill_rate_percent', 'fulfill_rate_percent',
+        'delivery_demand_percentage',
+    }
+    currency_cols = {'shipping_cost', 'export_tax'}
 
+    config = {}
 
-def _highlight_epe_company(val):
-    return 'font-weight: bold; color: #1976d2' if val == 'Yes' else ''
+    for col in df.columns:
+        label = COLUMN_LABELS.get(col, col.replace('_', ' ').title())
 
-
-def _color_fulfill_rate(val):
-    try:
-        if pd.isna(val):
-            return ''
-        num_val = float(str(val).replace('%', ''))
-        if num_val >= 100:
-            return 'color: green; font-weight: bold'
-        elif num_val >= 50:
-            return 'color: orange'
+        if col in quantity_cols:
+            config[col] = st.column_config.NumberColumn(
+                label, format="%,.0f",
+            )
+        elif col in rate_cols:
+            config[col] = st.column_config.ProgressColumn(
+                label, format="%.1f%%", min_value=0, max_value=100,
+            )
+        elif col in currency_cols:
+            config[col] = st.column_config.NumberColumn(
+                label, format="%,.2f",
+            )
+        elif col == 'days_overdue':
+            config[col] = st.column_config.NumberColumn(
+                label, format="%,.0f",
+            )
         else:
-            return 'color: red; font-weight: bold'
-    except Exception:
-        return ''
+            config[col] = st.column_config.TextColumn(label)
+
+    return config

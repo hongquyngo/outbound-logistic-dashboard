@@ -84,8 +84,11 @@ def main():
     else:
         st.session_state.selected_pt_codes = None
 
-    # KPI cards
-    display_metrics(df)
+    # Always load ALL active deliveries for overdue alert (cached — no extra DB hit)
+    df_all_active = data_loader.load_base_data(include_completed=False)
+
+    # KPI cards — overdue computed from full active data, rest from filtered
+    display_metrics(df, df_all_active)
 
     # Tabs — each @st.fragment runs independently
     tab1, tab2, tab3 = st.tabs([
