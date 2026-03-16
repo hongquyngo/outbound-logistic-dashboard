@@ -1,50 +1,47 @@
 # utils/delivery_schedule/metrics.py
-"""Top-level KPI metric cards for Delivery Schedule page"""
+"""Single-row KPI metrics for Delivery Schedule page.
+
+Consolidated into one meaningful set — no expander, no duplicates.
+Chosen metrics:
+  1. Total Deliveries (unique DN)
+  2. Total Line Items
+  3. Remaining Qty to Deliver
+  4. Overdue Deliveries (attention-grabber)
+  5. Avg Fulfillment Rate (overall health)
+  6. Out-of-Stock Products (action needed)
+"""
 
 import streamlit as st
 import pandas as pd
 
 
 def display_metrics(df):
-    """Display key metrics from the dataframe"""
-    # Main metrics row
-    col1, col2, col3, col4, col5 = st.columns(5)
+    """Display a single row of key delivery metrics."""
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
 
-    with col1:
-        st.metric("Total Deliveries", f"{df['delivery_id'].nunique():,}")
+    with c1:
+        st.metric("Deliveries", f"{df['delivery_id'].nunique():,}")
 
-    with col2:
-        st.metric("Total Line Items", f"{len(df):,}")
+    with c2:
+        st.metric("Line Items", f"{len(df):,}")
 
-    with col3:
-        total_qty = df['standard_quantity'].sum()
-        st.metric("Total Quantity", f"{total_qty:,.0f}")
+    with c3:
+        remaining = df['remaining_quantity_to_deliver'].sum()
+        st.metric("Remaining Qty", f"{remaining:,.0f}")
 
-    with col4:
-        remaining_qty = df['remaining_quantity_to_deliver'].sum()
-        st.metric("Remaining to Deliver", f"{remaining_qty:,.0f}")
+    with c4:
+        overdue = df[df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
+        st.metric(
+            "Overdue",
+            f"{overdue:,}",
+            delta=f"{overdue} need attention" if overdue > 0 else None,
+            delta_color="inverse" if overdue > 0 else "off",
+        )
 
-    with col5:
-        overdue_count = df[df['delivery_timeline_status'] == 'Overdue']['delivery_id'].nunique()
-        st.metric("Overdue Deliveries", f"{overdue_count:,}",
-                  delta_color="inverse" if overdue_count > 0 else "off")
+    with c5:
+        avg_rate = df['product_fulfill_rate_percent'].mean()
+        st.metric("Avg Fulfill %", f"{avg_rate:.1f}%")
 
-    # Advanced metrics
-    with st.expander("📊 Advanced Metrics", expanded=False):
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            avg_fulfill_rate = df['product_fulfill_rate_percent'].mean()
-            st.metric("Avg Product Fulfillment Rate", f"{avg_fulfill_rate:.1f}%")
-
-        with col2:
-            unique_products = df['product_id'].nunique()
-            st.metric("Unique Products", f"{unique_products:,}")
-
-        with col3:
-            out_of_stock = df[df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
-            st.metric("Products Out of Stock", f"{out_of_stock:,}")
-
-        with col4:
-            total_gap = df.groupby('product_id')['product_gap_quantity'].first().sum()
-            st.metric("Total Product Gap", f"{abs(total_gap):,.0f}")
+    with c6:
+        oos = df[df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
+        st.metric("Out of Stock", f"{oos:,}")
