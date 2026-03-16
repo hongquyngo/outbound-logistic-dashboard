@@ -105,12 +105,19 @@ def _render_oos_popover(oos_df):
         # ── Summary by product ───────────────────────────────────
         st.markdown("**By Product**")
 
-        # Build optional columns dynamically
+        # Build agg dict — include stock/demand/gap cols if available
         agg_dict = dict(
             DNs=('dn_number', 'nunique'),
             Customers=('customer', 'nunique'),
+            Total_Demand=('product_total_remaining_demand', 'max'),
+            In_Stock_Pref=('total_instock_at_preferred_warehouse', 'max'),
+            In_Stock_All=('total_instock_all_warehouses', 'max'),
+            Gap_Qty=('product_gap_quantity', 'min'),
             Remaining_Qty=('remaining_quantity_to_deliver', 'sum'),
         )
+        # Keep only aggs whose source column exists
+        agg_dict = {k: v for k, v in agg_dict.items() if v[0] in oos_df.columns}
+
         group_cols = ['pt_code', 'product_pn']
         group_cols = [c for c in group_cols if c in oos_df.columns]
 
@@ -126,19 +133,25 @@ def _render_oos_popover(oos_df):
             .rename(columns={
                 'pt_code': 'PT Code',
                 'product_pn': 'Product',
+                'Total_Demand': 'Total Demand',
+                'In_Stock_Pref': 'In-Stock (Pref WH)',
+                'In_Stock_All': 'In-Stock (All WH)',
+                'Gap_Qty': 'Gap Qty',
                 'Remaining_Qty': 'Remaining Qty',
             })
             .sort_values('Remaining Qty', ascending=False)
         )
 
+        qty_fmt = {c: '{:,.0f}' for c in product_summary.columns
+                   if c not in ('PT Code', 'Product')}
+
         st.dataframe(
             product_summary.style
-            .format({
-                'Remaining Qty': '{:,.0f}',
-                'DNs': '{:,.0f}',
-                'Customers': '{:,.0f}',
-            }, na_rep='-')
-            .bar(subset=['Remaining Qty'], color='#ff9999'),
+            .format(qty_fmt, na_rep='-')
+            .bar(subset=[c for c in ['Remaining Qty', 'Total Demand'] if c in product_summary.columns],
+                 color='#ff9999')
+            .bar(subset=[c for c in ['In-Stock (Pref WH)', 'In-Stock (All WH)'] if c in product_summary.columns],
+                 color='#90ee90'),
             use_container_width=True,
             hide_index=True,
         )
@@ -146,9 +159,15 @@ def _render_oos_popover(oos_df):
         # ── Detail by customer + DN ──────────────────────────────
         st.markdown("**By Customer / DN**")
 
-        detail_cols = ['dn_number', 'customer', 'recipient_company',
-                       'pt_code', 'product_pn', 'brand', 'etd',
-                       'remaining_quantity_to_deliver']
+        detail_cols = [
+            'dn_number', 'customer', 'recipient_company',
+            'pt_code', 'product_pn', 'brand', 'etd',
+            'standard_quantity', 'remaining_quantity_to_deliver',
+            'product_total_remaining_demand',
+            'total_instock_at_preferred_warehouse',
+            'total_instock_all_warehouses',
+            'product_gap_quantity',
+        ]
         detail_cols = [c for c in detail_cols if c in oos_df.columns]
 
         detail_df = (
@@ -165,16 +184,21 @@ def _render_oos_popover(oos_df):
                 'product_pn': 'Product',
                 'brand': 'Brand',
                 'etd': 'ETD',
+                'standard_quantity': 'Std Qty',
                 'remaining_quantity_to_deliver': 'Remaining Qty',
+                'product_total_remaining_demand': 'Total Demand',
+                'total_instock_at_preferred_warehouse': 'In-Stock (Pref WH)',
+                'total_instock_all_warehouses': 'In-Stock (All WH)',
+                'product_gap_quantity': 'Gap Qty',
             })
         )
 
-        fmt = {}
-        if 'Remaining Qty' in detail_df.columns:
-            fmt['Remaining Qty'] = '{:,.0f}'
+        detail_qty_fmt = {c: '{:,.0f}' for c in detail_df.columns
+                         if c not in ('DN Number', 'Customer', 'Ship To',
+                                      'PT Code', 'Product', 'Brand', 'ETD')}
 
         st.dataframe(
-            detail_df.style.format(fmt, na_rep='-'),
+            detail_df.style.format(detail_qty_fmt, na_rep='-'),
             use_container_width=True,
             hide_index=True,
             height=min(400, 40 + len(detail_df) * 35),
