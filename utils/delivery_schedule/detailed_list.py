@@ -14,7 +14,7 @@ def display_detailed_list(df):
     default_columns = ['dn_number', 'customer', 'recipient_company', 'etd',
                        'pt_code', 'product_pn', 'brand', 'standard_quantity',
                        'remaining_quantity_to_deliver', 'product_fulfill_rate_percent',
-                       'delivery_timeline_status', 'days_overdue', 'shipment_status_vn',
+                       'delivery_timeline_status', 'days_overdue', 'shipment_status',
                        'product_fulfillment_status', 'is_epe_company']
 
     display_columns = st.multiselect(

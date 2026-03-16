@@ -19,7 +19,7 @@ ROW_COLUMN_OPTIONS = {
     "Country":               "recipient_country_name",
     "Legal Entity":          "legal_entity",
     "Creator/Sales":         "created_by_name",
-    "Shipment Status":       "shipment_status_vn",
+    "Shipment Status":       "shipment_status",
     "Timeline Status":       "delivery_timeline_status",
     "Fulfillment Status":    "product_fulfillment_status",
     "EPE Company":           "is_epe_company",

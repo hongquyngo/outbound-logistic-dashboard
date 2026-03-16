@@ -78,7 +78,7 @@ def create_filter_section(filter_options):
             "📅 Date Range",
             options=["All Data", "This Week", "This Month",
                      "Next 30 Days", "Next 90 Days", "Custom"],
-            index=0,
+            index=1,
             key="date_preset",
         )
 
