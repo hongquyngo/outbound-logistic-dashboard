@@ -11,7 +11,7 @@ import logging
 import io
 import os
 from .calendar_utils import CalendarEventGenerator
-from ..config import EMAIL_SENDER, EMAIL_PASSWORD
+from ..config import OUTBOUND_EMAIL_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +20,11 @@ class EmailSender:
     """Handle email notifications for delivery schedules"""
     
     def __init__(self, smtp_host=None, smtp_port=None):
-        # Use environment variables or defaults
-        self.smtp_host = smtp_host or os.getenv("SMTP_HOST", "smtp.gmail.com")
-        self.smtp_port = smtp_port or int(os.getenv("SMTP_PORT", "587"))
-        self.sender_email = EMAIL_SENDER or os.getenv("EMAIL_SENDER", "outbound@prostech.vn")
-        self.sender_password = EMAIL_PASSWORD or os.getenv("EMAIL_PASSWORD", "")
+        # Use config V3 (OUTBOUND_EMAIL_CONFIG has sender, password, host, port)
+        self.smtp_host = smtp_host or OUTBOUND_EMAIL_CONFIG.get("host", "smtp.gmail.com")
+        self.smtp_port = smtp_port or OUTBOUND_EMAIL_CONFIG.get("port", 587)
+        self.sender_email = OUTBOUND_EMAIL_CONFIG.get("sender") or os.getenv("EMAIL_SENDER", "outbound@prostech.vn")
+        self.sender_password = OUTBOUND_EMAIL_CONFIG.get("password") or os.getenv("EMAIL_PASSWORD", "")
         
         # Log configuration
         logger.info(f"Email sender initialized with: {self.sender_email} via {self.smtp_host}:{self.smtp_port}")

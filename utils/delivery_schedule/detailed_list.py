@@ -325,7 +325,7 @@ def _show_changes_preview(changes):
 
 def _execute_etd_updates(changes, display_df, data_loader, email_sender, reason=""):
     """Write ETD changes to DB, send email, clear cache."""
-    current_user = st.session_state.get('user_name', 'System')
+    current_user = st.session_state.get('user_fullname', 'System')
     current_email = st.session_state.get('user_email', '')
 
     success_count = 0
