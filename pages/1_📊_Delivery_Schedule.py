@@ -37,7 +37,8 @@ data_loader = DeliveryDataLoader()
 def create_filter_section(filter_options):
     """Create the filter section with all filter controls"""
     
-    with st.expander("🔍 Filters", expanded=True):
+    with st.form("delivery_filters"):
+      with st.expander("🔍 Filters", expanded=True):
         # First row of filters
         col1, col2, col3 = st.columns(3)
         
@@ -106,6 +107,8 @@ def create_filter_section(filter_options):
             # Timeline status filter
             selected_timeline, exclude_timeline = create_timeline_filter(filter_options)
     
+      st.form_submit_button("🔄 Apply Filters", type="primary", use_container_width=True)
+    
     # Compile filters
     filters = {
         'date_from': date_from,
@@ -136,7 +139,7 @@ def create_filter_section(filter_options):
     return filters
 
 def create_date_filter(filter_options):
-    """Create improved date range filter with separate inputs and presets"""
+    """Create date range filter with presets - form-compatible (no st.button/st.rerun)"""
     date_range_options = filter_options.get('date_range', {})
     today = datetime.now().date()
     
@@ -155,64 +158,49 @@ def create_date_filter(filter_options):
         data_min, data_max = data_max, data_min
     
     # Extend range for easier calendar navigation
-    # This allows selecting any month/year without restrictions
     extended_min = data_min.replace(month=1, day=1)
     extended_max = data_max.replace(month=12, day=31)
     
-    # Initialize session state for dates if not exists
-    if 'filter_date_from' not in st.session_state:
-        st.session_state.filter_date_from = data_min
-    if 'filter_date_to' not in st.session_state:
-        st.session_state.filter_date_to = data_max
-    
     st.markdown("**📅 Date Range**")
     
-    # Preset buttons row
-    preset_cols = st.columns(5)
+    # Preset selectbox (works inside st.form, unlike st.button)
+    preset = st.selectbox(
+        "Quick Range",
+        options=["All Data", "This Week", "This Month", "Next 30 Days", "Next 90 Days", "Custom"],
+        index=0,
+        key="date_preset"
+    )
     
-    with preset_cols[0]:
-        if st.button("This Week", use_container_width=True, key="preset_this_week"):
-            week_start = today - timedelta(days=today.weekday())
-            week_end = week_start + timedelta(days=6)
-            st.session_state.filter_date_from = max(week_start, data_min)
-            st.session_state.filter_date_to = min(week_end, data_max)
-            st.rerun()
+    # Calculate dates based on preset
+    if preset == "This Week":
+        week_start = today - timedelta(days=today.weekday())
+        week_end = week_start + timedelta(days=6)
+        default_from = max(week_start, data_min)
+        default_to = min(week_end, data_max)
+    elif preset == "This Month":
+        month_start = today.replace(day=1)
+        next_month = today.replace(day=28) + timedelta(days=4)
+        month_end = next_month - timedelta(days=next_month.day)
+        default_from = max(month_start, data_min)
+        default_to = min(month_end, data_max)
+    elif preset == "Next 30 Days":
+        default_from = max(today, data_min)
+        default_to = min(today + timedelta(days=30), data_max)
+    elif preset == "Next 90 Days":
+        default_from = max(today, data_min)
+        default_to = min(today + timedelta(days=90), data_max)
+    else:
+        # "All Data" or "Custom"
+        default_from = data_min
+        default_to = data_max
     
-    with preset_cols[1]:
-        if st.button("This Month", use_container_width=True, key="preset_this_month"):
-            month_start = today.replace(day=1)
-            # Get last day of month
-            next_month = today.replace(day=28) + timedelta(days=4)
-            month_end = next_month - timedelta(days=next_month.day)
-            st.session_state.filter_date_from = max(month_start, data_min)
-            st.session_state.filter_date_to = min(month_end, data_max)
-            st.rerun()
-    
-    with preset_cols[2]:
-        if st.button("Next 30 Days", use_container_width=True, key="preset_30_days"):
-            st.session_state.filter_date_from = max(today, data_min)
-            st.session_state.filter_date_to = min(today + timedelta(days=30), data_max)
-            st.rerun()
-    
-    with preset_cols[3]:
-        if st.button("Next 90 Days", use_container_width=True, key="preset_90_days"):
-            st.session_state.filter_date_from = max(today, data_min)
-            st.session_state.filter_date_to = min(today + timedelta(days=90), data_max)
-            st.rerun()
-    
-    with preset_cols[4]:
-        if st.button("All Data", use_container_width=True, key="preset_all_data"):
-            st.session_state.filter_date_from = data_min
-            st.session_state.filter_date_to = data_max
-            st.rerun()
-    
-    # Two separate date inputs - clear labels
+    # Date inputs — shown for fine-tuning, overridden by preset unless "Custom"
     date_cols = st.columns(2)
     
     with date_cols[0]:
         date_from = st.date_input(
             "📆 From Date",
-            value=st.session_state.filter_date_from,
+            value=default_from,
             min_value=extended_min,
             max_value=extended_max,
             key="input_date_from"
@@ -221,15 +209,17 @@ def create_date_filter(filter_options):
     with date_cols[1]:
         date_to = st.date_input(
             "📆 To Date",
-            value=st.session_state.filter_date_to,
+            value=default_to,
             min_value=extended_min,
             max_value=extended_max,
             key="input_date_to"
         )
     
-    # Update session state
-    st.session_state.filter_date_from = date_from
-    st.session_state.filter_date_to = date_to
+    # When a preset is active (not Custom), use calculated dates
+    # This ensures preset always wins over manual date input
+    if preset != "Custom":
+        date_from = default_from
+        date_to = default_to
     
     # Validation with auto-swap
     if date_from > date_to:
@@ -395,6 +385,7 @@ def display_metrics(df):
 # PIVOT TABLE FUNCTIONS
 # ============================================================================
 
+@st.fragment
 def display_pivot_table(df, data_loader):
     """Display pivot table view"""
     st.subheader("📊 Pivot Table View")
@@ -523,7 +514,7 @@ def create_customer_pivot(pivot_df):
     
     st.dataframe(
         pivot_table.style.format("{:,.0f}").background_gradient(cmap='Blues'),
-        use_container_width=True
+        width="stretch"
     )
     
     return pivot_table
@@ -649,7 +640,7 @@ def display_styled_pivot(table, period_columns, freeze_up_to='Package Size'):
     # Display the dataframe
     st.dataframe(
         styled_table,
-        use_container_width=True,
+        width="stretch",
         height=600,
         column_config=column_config
     )
@@ -669,13 +660,14 @@ def display_default_pivot(pivot_df):
     
     st.dataframe(
         pivot_df.style.format(existing_formats, na_rep='-'),
-        use_container_width=True
+        width="stretch"
     )
 
 # ============================================================================
 # DETAILED LIST FUNCTIONS
 # ============================================================================
 
+@st.fragment
 def display_detailed_list(df):
     """Display detailed delivery list"""
     st.subheader("📋 Detailed Delivery List")
@@ -708,7 +700,7 @@ def display_detailed_list(df):
     # Apply styling
     styled_df = style_detailed_list(display_df)
     
-    st.dataframe(styled_df, use_container_width=True)
+    st.dataframe(styled_df, width="stretch")
 
 def style_detailed_list(df):
     """Apply styling to detailed list dataframe"""
@@ -745,19 +737,19 @@ def style_detailed_list(df):
     
     # Apply conditional formatting
     if 'delivery_timeline_status' in df.columns:
-        styled = styled.applymap(
+        styled = styled.map(
             highlight_timeline_status,
             subset=['delivery_timeline_status']
         )
     
     if 'product_fulfillment_status' in df.columns:
-        styled = styled.applymap(
+        styled = styled.map(
             highlight_fulfillment_status,
             subset=['product_fulfillment_status']
         )
     
     if 'is_epe_company' in df.columns:
-        styled = styled.applymap(
+        styled = styled.map(
             highlight_epe_company,
             subset=['is_epe_company']
         )
@@ -765,7 +757,7 @@ def style_detailed_list(df):
     # Color code fulfillment rates
     for col in rate_columns:
         if col in df.columns:
-            styled = styled.applymap(
+            styled = styled.map(
                 color_fulfill_rate,
                 subset=[col]
             )
@@ -819,6 +811,7 @@ def color_fulfill_rate(val):
 # PRODUCT ANALYSIS FUNCTIONS
 # ============================================================================
 
+@st.fragment
 def display_product_analysis(df, data_loader):
     """Display product demand analysis"""
     st.subheader("🔍 Product Demand Analysis")
@@ -973,7 +966,7 @@ def create_shortage_chart(product_analysis, num_products, sort_column):
     if sort_column in shortage_products.columns:
         shortage_products = shortage_products.sort_values(sort_column, ascending=False)
     
-    top_shortage = shortage_products.head(num_products)
+    top_shortage = shortage_products.head(num_products).copy()
     
     # Create chart
     if 'gap_quantity' not in top_shortage.columns or top_shortage['gap_quantity'].isna().all():
@@ -1085,7 +1078,7 @@ def create_gap_chart(chart_data, sort_column):
         textposition='outside'
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 def create_demand_chart(chart_data):
     """Create fallback chart based on demand only"""
@@ -1149,7 +1142,7 @@ def create_demand_chart(chart_data):
         )
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 def build_hover_template(chart_data):
     """Build dynamic hover template based on available columns"""
@@ -1261,7 +1254,7 @@ def display_product_detail_table(product_analysis):
     
     st.dataframe(
         styled_table,
-        use_container_width=True,
+        width="stretch",
         height=400
     )
     
@@ -1319,7 +1312,7 @@ def style_product_table(df):
     
     # Apply conditional formatting
     if 'fulfillment_status' in df.columns:
-        styled = styled.applymap(
+        styled = styled.map(
             color_fulfillment_status,
             subset=['fulfillment_status']
         )
@@ -1340,6 +1333,7 @@ def color_fulfillment_status(val):
 # ALERT FUNCTIONS
 # ============================================================================
 
+@st.fragment
 def display_overdue_alert(df):
     """Display overdue deliveries alert"""
     overdue_df = df[df['delivery_timeline_status'] == 'Overdue']
@@ -1370,7 +1364,7 @@ def display_overdue_alert(df):
                 subset=['Total Qty'],
                 color='#ff6b6b'
             ),
-            use_container_width=True
+            width="stretch"
         )
 
 # ============================================================================
@@ -1386,10 +1380,6 @@ def main():
     
     # Create filters
     filters = create_filter_section(filter_options)
-    
-    # Apply filters button
-    if st.button("🔄 Apply Filters", type="primary", use_container_width=True):
-        st.session_state.filters_applied = True
     
     # Load data
     with st.spinner("Loading delivery data..."):
