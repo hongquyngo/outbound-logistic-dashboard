@@ -14,38 +14,37 @@ def create_filter_section(filter_options):
     else stays inside the form to prevent full-page reruns.
     """
 
-    # ── Compact exclude-checkbox styling ─────────────────────────
+    # ── Exclude checkbox styling (absolute-positioned, no sub-columns) ──
     st.markdown("""
     <style>
-        /* ── Exclude checkbox: inline with filter label ── */
-        .excl-row {
-            display: flex;
-            align-items: center;
-            margin-bottom: -1.1rem;
-            min-height: 1.6rem;
+        /* Columns with both multiselect + checkbox: relative container */
+        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]):has([data-testid="stCheckbox"]) {
+            position: relative;
         }
-        .excl-row .filter-label {
-            font-size: 0.875rem;
-            font-weight: 400;
-            white-space: nowrap;
+        /* Float checkbox to top-right corner of the label line */
+        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) > [data-testid="stElementContainer"]:has([data-testid="stCheckbox"]) {
+            position: absolute;
+            top: -0.15rem;
+            right: 0;
+            z-index: 1;
+            width: auto !important;
         }
-        /* Shrink the checkbox widget */
-        .excl-row [data-testid="stCheckbox"] {
-            margin: 0; padding: 0;
-        }
-        .excl-row [data-testid="stCheckbox"] > label {
-            gap: 0.25rem;
+        /* Shrink checkbox itself */
+        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) [data-testid="stCheckbox"] > label {
+            gap: 0.2rem;
             min-height: unset;
             padding: 0;
             align-items: center;
         }
-        .excl-row [data-testid="stCheckbox"] > label p {
-            font-size: 0.72rem !important;
-            color: rgba(130,130,130,0.9);
+        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) [data-testid="stCheckbox"] > label p {
+            font-size: 0.7rem !important;
+            color: rgba(140,140,140,0.9);
             line-height: 1;
         }
-        .excl-row [data-testid="stCheckbox"] > label > div[role="checkbox"] {
-            width: 0.85rem; height: 0.85rem;
+        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) [data-testid="stCheckbox"] > label > div[role="checkbox"] {
+            width: 0.8rem;
+            height: 0.8rem;
+            min-width: 0.8rem;
         }
 
         /* ── Overdue popover: full width ── */
@@ -170,24 +169,14 @@ def create_filter_section(filter_options):
                 placeholder="All states", key="filter_states",
             )
         with r4c2:
-            lc, ec = st.columns([4, 1])
-            with lc:
-                st.markdown(
-                    '<div class="excl-row"><span class="filter-label">Country</span></div>',
-                    unsafe_allow_html=True,
-                )
-            with ec:
-                st.markdown('<div class="excl-row">', unsafe_allow_html=True)
-                exclude_countries = st.checkbox(
-                    "Excl", key="exclude_countries", value=False,
-                    help="Exclude selected countries",
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
             selected_countries = st.multiselect(
                 "Country",
                 options=filter_options.get('countries', []),
                 placeholder="All countries", key="filter_countries",
-                label_visibility="collapsed",
+            )
+            exclude_countries = st.checkbox(
+                "Excl", key="exclude_countries", value=False,
+                help="Exclude selected countries",
             )
         with r4c3:
             epe_filter = st.selectbox(
@@ -263,24 +252,16 @@ def _resolve_date_preset(preset, date_from, date_to, today, data_min, data_max):
 
 
 def _multiselect_excl(label, options, key_prefix, default=None, excl_default=False):
-    """Label + tiny Excl checkbox on one line, multiselect below."""
-    lc, ec = st.columns([4, 1])
-    with lc:
-        st.markdown(
-            f'<div class="excl-row"><span class="filter-label">{label}</span></div>',
-            unsafe_allow_html=True,
-        )
-    with ec:
-        st.markdown('<div class="excl-row">', unsafe_allow_html=True)
-        exclude = st.checkbox(
-            "Excl", key=f"exclude_{key_prefix}", value=excl_default,
-            help=f"Exclude selected {label.lower()}",
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
+    """Multiselect with tiny Excl checkbox floated to top-right of label.
 
+    No sub-columns — CSS positions the checkbox absolutely.
+    """
     selected = st.multiselect(
         label, options=options, default=default,
         placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}",
-        label_visibility="collapsed",
+    )
+    exclude = st.checkbox(
+        "Excl", key=f"exclude_{key_prefix}", value=excl_default,
+        help=f"Exclude selected {label.lower()}",
     )
     return selected, exclude
