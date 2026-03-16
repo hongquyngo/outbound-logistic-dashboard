@@ -3,10 +3,12 @@
 
 Features:
   • Read-only dataframe with native column visibility.
-  • Single ETD edit via row selection — click any row, all lines of
-    the same DN auto-highlight (ETD is a header-level field).
+  • Inline ETD edit via st.data_editor — click any ETD cell to
+    open the date picker.  Changing one line auto-expands all lines
+    of the same DN into a staging section below (ETD is header-level).
+  • Multiple DNs can be edited with different new ETDs before saving.
   • Bulk ETD update — select multiple DNs, set one new date.
-  • On save → DB update → email notification → cache invalidation → refresh.
+  • On save → DB update → email notification → cache clear → refresh.
 
 Email notification:
   TO  : creator (created_by_email of each affected DN)
@@ -147,143 +149,93 @@ def _display_readonly_table(display_df):
 def _display_editable_table(display_df, data_loader, email_sender):
     """Render the table with editable ETD + bulk update section.
 
-    Inline edit uses st.dataframe(on_select) — selecting ANY row
-    auto-expands to ALL lines of the same DN, since ETD is a
-    header-level field (one per delivery).
+    Inline edit flow:
+      1. User clicks any ETD cell → date picker opens → picks new date.
+      2. All lines of the same DN auto-appear in the staging section
+         below with the new ETD.
+      3. User can continue editing more DNs — each DN can have a
+         different new ETD.  All accumulate in the staging section.
+      4. Save button commits all staged changes at once.
     """
 
     edit_tab, bulk_tab = st.tabs(["✏️ Inline Edit", "📦 Bulk Update ETD"])
 
-    # ━━━━ Tab 1: Inline Select → Edit ETD ━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━ Tab 1: Inline Edit via data_editor ━━━━━━━━━━━━━━━━━━━━
     with edit_tab:
         st.caption(
-            "Select any row — all lines of the same DN will be "
-            "highlighted automatically. Then pick a new ETD below."
+            "Click any **ETD** cell to pick a new date.  "
+            "All lines of the same DN will appear in the staging "
+            "section below.  You can edit multiple DNs before saving."
         )
 
-        # Sort by dn_number so lines of same DN are grouped
-        sorted_df = display_df.sort_values(
-            ['dn_number', 'pt_code'], ignore_index=True,
+        # Keep a copy of original ETD per delivery_id for comparison
+        original_etd_map = (
+            display_df
+            .drop_duplicates(subset='delivery_id')
+            .set_index('delivery_id')['etd']
+            .to_dict()
         )
 
-        column_config = _build_column_config(sorted_df)
-        col_order = [c for c in DEFAULT_COLUMNS if c in sorted_df.columns]
+        column_config = _build_column_config(display_df, etd_editable=True)
+        col_order = [c for c in DEFAULT_COLUMNS if c in display_df.columns]
 
-        # ── Selectable dataframe ─────────────────────────────────
-        event = st.dataframe(
-            sorted_df,
+        edited_df = st.data_editor(
+            display_df,
             column_order=col_order,
             column_config=column_config,
             use_container_width=True,
             hide_index=True,
-            height=min(700, 50 + len(sorted_df) * 35),
-            key="etd_select_table",
-            on_select="rerun",
-            selection_mode="multi-row",
+            height=min(700, 50 + len(display_df) * 35),
+            key="etd_editor",
+            num_rows="fixed",
         )
 
-        selected_indices = event.selection.rows if event.selection else []
+        # ── Detect changes at DN level ───────────────────────────
+        # For each delivery_id, if ANY line has a different ETD
+        # from the original, treat the whole DN as changed and use
+        # the new ETD (first changed value found for that DN).
+        changes = _detect_dn_etd_changes(original_etd_map, edited_df)
 
-        if not selected_indices:
-            st.info("👆 Click on any row to select a DN for ETD update")
-        else:
-            # ── Auto-expand: selected rows → all rows of same DN(s) ──
-            selected_delivery_ids = (
-                sorted_df.iloc[selected_indices]['delivery_id']
-                .unique()
-                .tolist()
-            )
-            affected_mask = sorted_df['delivery_id'].isin(selected_delivery_ids)
-            affected_df = sorted_df[affected_mask]
-
-            # ── DN summary ───────────────────────────────────────────
-            dn_summary = (
-                affected_df
-                .groupby(['delivery_id', 'dn_number', 'customer', 'recipient_company', 'etd'])
-                .size()
-                .reset_index(name='lines')
-                .sort_values('dn_number')
-            )
-
+        # ── Staging section ──────────────────────────────────────
+        if changes:
             st.divider()
             st.markdown(
-                f"**📋 {len(dn_summary)} DN(s) selected · "
-                f"{len(affected_df)} line(s) affected**"
+                f"### 📝 Staged ETD Changes — "
+                f"{len(changes)} DN(s)"
             )
 
-            # ── Highlighted affected lines ───────────────────────────
-            highlight_cols = [
-                'dn_number', 'customer', 'recipient_company', 'etd',
-                'pt_code', 'product_pn', 'brand',
-                'remaining_quantity_to_deliver', 'delivery_timeline_status',
-            ]
-            highlight_cols = [c for c in highlight_cols if c in affected_df.columns]
+            # Collect all affected lines for highlight
+            changed_ids = {c['delivery_id'] for c in changes}
+            affected_df = edited_df[
+                edited_df['delivery_id'].isin(changed_ids)
+            ].copy()
 
-            highlight_display = affected_df[highlight_cols].copy()
-            highlight_display = highlight_display.rename(columns=COLUMN_LABELS)
+            # Show summary table: DN / Customer / Ship To / Old → New
+            _show_changes_preview(changes)
 
-            st.dataframe(
-                highlight_display.style.map(
-                    lambda _: 'background-color: #fff8e1',
-                ),
-                use_container_width=True,
-                hide_index=True,
-                height=min(300, 40 + len(highlight_display) * 35),
-            )
+            # Show affected lines with highlight
+            _show_affected_lines(affected_df)
 
-            # ── New ETD + Reason + Save ──────────────────────────────
-            col_date, col_reason, col_btn = st.columns([1, 2, 1])
-
-            with col_date:
-                # Default to earliest current ETD of selected DNs
-                current_etds = dn_summary['etd'].dropna()
-                default_date = (
-                    min(current_etds) if len(current_etds) > 0
-                    else datetime.now().date()
-                )
-                new_etd = st.date_input(
-                    "New ETD",
-                    value=default_date,
-                    key="inline_new_etd",
-                )
-
+            # Reason + Save
+            col_reason, col_btn = st.columns([3, 1])
             with col_reason:
                 reason = st.text_input(
-                    "Reason (optional)",
+                    "Reason for change (optional)",
                     placeholder="e.g. Customer requested reschedule",
                     key="inline_etd_reason",
                 )
-
-            # Build changes list
-            changes = []
-            for _, row in dn_summary.iterrows():
-                old_etd = row['etd']
-                if old_etd == new_etd:
-                    continue
-                changes.append({
-                    'delivery_id': row['delivery_id'],
-                    'dn_number': row['dn_number'],
-                    'customer': row['customer'],
-                    'recipient_company': row['recipient_company'],
-                    'old_etd': old_etd,
-                    'new_etd': new_etd,
-                })
-
             with col_btn:
                 st.markdown("")  # vertical spacer
-                if not changes:
-                    st.warning("Same date")
-                else:
-                    if st.button(
-                        f"💾 Update {len(changes)} DN(s)",
-                        type="primary",
-                        key="save_inline_etd",
-                        use_container_width=True,
-                    ):
-                        _execute_etd_updates(
-                            changes, display_df, data_loader,
-                            email_sender, reason=reason,
-                        )
+                if st.button(
+                    f"💾 Save {len(changes)} DN(s) & Notify",
+                    type="primary",
+                    key="save_inline_etd",
+                    use_container_width=True,
+                ):
+                    _execute_etd_updates(
+                        changes, display_df, data_loader,
+                        email_sender, reason=reason,
+                    )
 
     # ━━━━ Tab 2: Bulk Update ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with bulk_tab:
@@ -371,6 +323,96 @@ def _display_bulk_update(display_df, data_loader, email_sender):
 
 
 # ── Helpers ──────────────────────────────────────────────────────
+
+
+def _detect_dn_etd_changes(original_etd_map, edited_df):
+    """Detect ETD changes at the DN (delivery_id) level.
+
+    Parameters
+    ----------
+    original_etd_map : dict
+        {delivery_id: original_etd_date} — one entry per DN.
+    edited_df : DataFrame
+        The full DataFrame returned by st.data_editor.
+
+    Returns
+    -------
+    list[dict] — one entry per changed DN, each with:
+        delivery_id, dn_number, customer, recipient_company,
+        old_etd, new_etd.
+
+    Logic: scan every row.  If ANY line of a DN has a different ETD
+    from the original, the whole DN is staged with that new ETD.
+    The user only needs to change ONE line — the whole DN adopts it.
+    """
+    # Collect new_etd per delivery_id (first changed value wins)
+    dn_new_etd = {}  # delivery_id → new_etd
+    dn_info = {}     # delivery_id → {dn_number, customer, ...}
+
+    for _, row in edited_df.iterrows():
+        did = row['delivery_id']
+
+        # Already found a change for this DN — skip
+        if did in dn_new_etd:
+            continue
+
+        new_etd = row['etd']
+        if isinstance(new_etd, datetime):
+            new_etd = new_etd.date()
+
+        old_etd = original_etd_map.get(did)
+        if isinstance(old_etd, datetime):
+            old_etd = old_etd.date()
+
+        # Skip if both null or same
+        if pd.isna(old_etd) and pd.isna(new_etd):
+            continue
+        if old_etd == new_etd:
+            continue
+
+        # Found a change — record it
+        dn_new_etd[did] = new_etd
+        dn_info[did] = {
+            'dn_number': row.get('dn_number', ''),
+            'customer': row.get('customer', ''),
+            'recipient_company': row.get('recipient_company', ''),
+            'old_etd': old_etd,
+        }
+
+    # Build changes list
+    changes = []
+    for did, new_etd in dn_new_etd.items():
+        info = dn_info[did]
+        changes.append({
+            'delivery_id': did,
+            'dn_number': info['dn_number'],
+            'customer': info['customer'],
+            'recipient_company': info['recipient_company'],
+            'old_etd': info['old_etd'],
+            'new_etd': new_etd,
+        })
+
+    return changes
+
+
+def _show_affected_lines(affected_df):
+    """Show affected lines with highlight background."""
+    show_cols = [
+        'dn_number', 'customer', 'recipient_company', 'etd',
+        'pt_code', 'product_pn', 'brand',
+        'remaining_quantity_to_deliver', 'delivery_timeline_status',
+    ]
+    show_cols = [c for c in show_cols if c in affected_df.columns]
+
+    display = affected_df[show_cols].copy()
+    display = display.rename(columns=COLUMN_LABELS)
+
+    st.dataframe(
+        display.style.map(lambda _: 'background-color: #fff8e1'),
+        use_container_width=True,
+        hide_index=True,
+        height=min(300, 40 + len(display) * 35),
+    )
 
 
 def _show_changes_preview(changes):
@@ -487,8 +529,16 @@ def _send_etd_notifications(changes, display_df, email_sender,
 
 # ── Column config builder ────────────────────────────────────────
 
-def _build_column_config(df):
-    """Build st.column_config dict with proper types, labels, and formats."""
+def _build_column_config(df, etd_editable=False):
+    """Build st.column_config dict with proper types, labels, and formats.
+
+    Parameters
+    ----------
+    df : DataFrame
+    etd_editable : bool
+        If True, ETD column is an editable DateColumn (for data_editor).
+        All other columns are always disabled / read-only.
+    """
 
     quantity_cols = {
         'standard_quantity', 'selling_quantity', 'remaining_quantity_to_deliver',
@@ -507,17 +557,31 @@ def _build_column_config(df):
     for col in df.columns:
         label = COLUMN_LABELS.get(col, col.replace('_', ' ').title())
 
+        # ETD — editable date column when in data_editor mode
+        if col == 'etd' and etd_editable:
+            config[col] = st.column_config.DateColumn(
+                label, help="Click to change ETD",
+            )
+            continue
+
+        # Everything else is read-only
         if col in quantity_cols:
-            config[col] = st.column_config.NumberColumn(label, format="%,.0f")
+            config[col] = st.column_config.NumberColumn(
+                label, format="%,.0f", disabled=True,
+            )
         elif col in rate_cols:
             config[col] = st.column_config.ProgressColumn(
                 label, format="%.1f%%", min_value=0, max_value=100,
             )
         elif col in currency_cols:
-            config[col] = st.column_config.NumberColumn(label, format="%,.2f")
+            config[col] = st.column_config.NumberColumn(
+                label, format="%,.2f", disabled=True,
+            )
         elif col == 'days_overdue':
-            config[col] = st.column_config.NumberColumn(label, format="%,.0f")
+            config[col] = st.column_config.NumberColumn(
+                label, format="%,.0f", disabled=True,
+            )
         else:
-            config[col] = st.column_config.TextColumn(label)
+            config[col] = st.column_config.TextColumn(label, disabled=True)
 
     return config
