@@ -2,10 +2,11 @@
 """Detailed delivery list with inline ETD editing (single & bulk).
 
 Features:
-  • Read-only dataframe with native column visibility (unchanged).
-  • Single ETD edit via st.data_editor — user clicks the ETD cell.
+  • Read-only dataframe with native column visibility.
+  • Single ETD edit via row selection — click any row, all lines of
+    the same DN auto-highlight (ETD is a header-level field).
   • Bulk ETD update — select multiple DNs, set one new date.
-  • On save → DB update → email notification → cache invalidation.
+  • On save → DB update → email notification → cache invalidation → refresh.
 
 Email notification:
   TO  : creator (created_by_email of each affected DN)
@@ -128,7 +129,7 @@ def _display_readonly_table(display_df):
         display_df = display_df.copy()
         display_df['etd'] = display_df['etd'].astype(str)
 
-    column_config = _build_column_config(display_df, editable=False)
+    column_config = _build_column_config(display_df)
     col_order = [c for c in DEFAULT_COLUMNS if c in display_df.columns]
 
     st.dataframe(
@@ -144,45 +145,145 @@ def _display_readonly_table(display_df):
 # ── Editable table + bulk update ─────────────────────────────────
 
 def _display_editable_table(display_df, data_loader, email_sender):
-    """Render the table with editable ETD + bulk update section."""
+    """Render the table with editable ETD + bulk update section.
+
+    Inline edit uses st.dataframe(on_select) — selecting ANY row
+    auto-expands to ALL lines of the same DN, since ETD is a
+    header-level field (one per delivery).
+    """
 
     edit_tab, bulk_tab = st.tabs(["✏️ Inline Edit", "📦 Bulk Update ETD"])
 
-    # ━━━━ Tab 1: Inline Edit via data_editor ━━━━━━━━━━━━━━━━━━━━
+    # ━━━━ Tab 1: Inline Select → Edit ETD ━━━━━━━━━━━━━━━━━━━━━━━
     with edit_tab:
         st.caption(
-            "Click any **ETD** cell to change the date, then press "
-            "**💾 Save ETD Changes** below."
+            "Select any row — all lines of the same DN will be "
+            "highlighted automatically. Then pick a new ETD below."
         )
 
-        original_etd = display_df[['delivery_id', 'dn_number', 'etd']].copy()
+        # Sort by dn_number so lines of same DN are grouped
+        sorted_df = display_df.sort_values(
+            ['dn_number', 'pt_code'], ignore_index=True,
+        )
 
-        column_config = _build_column_config(display_df, editable=True)
-        col_order = [c for c in DEFAULT_COLUMNS if c in display_df.columns]
+        column_config = _build_column_config(sorted_df)
+        col_order = [c for c in DEFAULT_COLUMNS if c in sorted_df.columns]
 
-        edited_df = st.data_editor(
-            display_df,
+        # ── Selectable dataframe ─────────────────────────────────
+        event = st.dataframe(
+            sorted_df,
             column_order=col_order,
             column_config=column_config,
             use_container_width=True,
             hide_index=True,
-            height=min(700, 50 + len(display_df) * 35),
-            key="etd_editor",
-            num_rows="fixed",
+            height=min(700, 50 + len(sorted_df) * 35),
+            key="etd_select_table",
+            on_select="rerun",
+            selection_mode="multi-row",
         )
 
-        changes = _detect_etd_changes(original_etd, edited_df)
+        selected_indices = event.selection.rows if event.selection else []
 
-        if changes:
-            st.info(f"📝 **{len(changes)}** ETD change(s) detected")
-            _show_changes_preview(changes)
+        if not selected_indices:
+            st.info("👆 Click on any row to select a DN for ETD update")
+        else:
+            # ── Auto-expand: selected rows → all rows of same DN(s) ──
+            selected_delivery_ids = (
+                sorted_df.iloc[selected_indices]['delivery_id']
+                .unique()
+                .tolist()
+            )
+            affected_mask = sorted_df['delivery_id'].isin(selected_delivery_ids)
+            affected_df = sorted_df[affected_mask]
 
-            if st.button(
-                "💾 Save ETD Changes & Send Notification",
-                type="primary",
-                key="save_inline_etd",
-            ):
-                _execute_etd_updates(changes, display_df, data_loader, email_sender)
+            # ── DN summary ───────────────────────────────────────────
+            dn_summary = (
+                affected_df
+                .groupby(['delivery_id', 'dn_number', 'customer', 'recipient_company', 'etd'])
+                .size()
+                .reset_index(name='lines')
+                .sort_values('dn_number')
+            )
+
+            st.divider()
+            st.markdown(
+                f"**📋 {len(dn_summary)} DN(s) selected · "
+                f"{len(affected_df)} line(s) affected**"
+            )
+
+            # ── Highlighted affected lines ───────────────────────────
+            highlight_cols = [
+                'dn_number', 'customer', 'recipient_company', 'etd',
+                'pt_code', 'product_pn', 'brand',
+                'remaining_quantity_to_deliver', 'delivery_timeline_status',
+            ]
+            highlight_cols = [c for c in highlight_cols if c in affected_df.columns]
+
+            highlight_display = affected_df[highlight_cols].copy()
+            highlight_display = highlight_display.rename(columns=COLUMN_LABELS)
+
+            st.dataframe(
+                highlight_display.style.map(
+                    lambda _: 'background-color: #fff8e1',
+                ),
+                use_container_width=True,
+                hide_index=True,
+                height=min(300, 40 + len(highlight_display) * 35),
+            )
+
+            # ── New ETD + Reason + Save ──────────────────────────────
+            col_date, col_reason, col_btn = st.columns([1, 2, 1])
+
+            with col_date:
+                # Default to earliest current ETD of selected DNs
+                current_etds = dn_summary['etd'].dropna()
+                default_date = (
+                    min(current_etds) if len(current_etds) > 0
+                    else datetime.now().date()
+                )
+                new_etd = st.date_input(
+                    "New ETD",
+                    value=default_date,
+                    key="inline_new_etd",
+                )
+
+            with col_reason:
+                reason = st.text_input(
+                    "Reason (optional)",
+                    placeholder="e.g. Customer requested reschedule",
+                    key="inline_etd_reason",
+                )
+
+            # Build changes list
+            changes = []
+            for _, row in dn_summary.iterrows():
+                old_etd = row['etd']
+                if old_etd == new_etd:
+                    continue
+                changes.append({
+                    'delivery_id': row['delivery_id'],
+                    'dn_number': row['dn_number'],
+                    'customer': row['customer'],
+                    'recipient_company': row['recipient_company'],
+                    'old_etd': old_etd,
+                    'new_etd': new_etd,
+                })
+
+            with col_btn:
+                st.markdown("")  # vertical spacer
+                if not changes:
+                    st.warning("Same date")
+                else:
+                    if st.button(
+                        f"💾 Update {len(changes)} DN(s)",
+                        type="primary",
+                        key="save_inline_etd",
+                        use_container_width=True,
+                    ):
+                        _execute_etd_updates(
+                            changes, display_df, data_loader,
+                            email_sender, reason=reason,
+                        )
 
     # ━━━━ Tab 2: Bulk Update ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with bulk_tab:
@@ -271,38 +372,6 @@ def _display_bulk_update(display_df, data_loader, email_sender):
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-def _detect_etd_changes(original_etd, edited_df):
-    """Compare original ETD with edited DataFrame, return list of dicts."""
-    changes = []
-    for idx in original_etd.index:
-        if idx not in edited_df.index:
-            continue
-        old = original_etd.at[idx, 'etd']
-        new = edited_df.at[idx, 'etd']
-        if isinstance(new, datetime):
-            new = new.date()
-        if isinstance(old, datetime):
-            old = old.date()
-        if pd.isna(old) and pd.isna(new):
-            continue
-        if old != new:
-            changes.append({
-                'delivery_id': edited_df.at[idx, 'delivery_id'],
-                'dn_number': edited_df.at[idx, 'dn_number'],
-                'customer': edited_df.at[idx, 'customer'] if 'customer' in edited_df.columns else '',
-                'recipient_company': edited_df.at[idx, 'recipient_company'] if 'recipient_company' in edited_df.columns else '',
-                'old_etd': old,
-                'new_etd': new,
-            })
-    # Deduplicate by delivery_id (multiple lines per DN)
-    seen = set()
-    unique_changes = []
-    for c in changes:
-        if c['delivery_id'] not in seen:
-            seen.add(c['delivery_id'])
-            unique_changes.append(c)
-    return unique_changes
-
 
 def _show_changes_preview(changes):
     """Display a compact preview table of pending ETD changes."""
@@ -358,9 +427,14 @@ def _execute_etd_updates(changes, display_df, data_loader, email_sender, reason=
 
     if errors:
         st.error("Some updates failed:\n" + "\n".join(errors))
+        if success_count > 0:
+            # Some succeeded but not all — let user see errors, then offer refresh
+            if st.button("🔄 Refresh data", key="refresh_after_partial"):
+                st.rerun()
 
     # Auto-rerun only when ALL succeeded — otherwise let user see errors
     if success_count > 0 and not errors:
+        st.toast(f"✅ Updated {success_count} DN(s) — refreshing data…")
         st.rerun()
 
 
@@ -413,7 +487,7 @@ def _send_etd_notifications(changes, display_df, email_sender,
 
 # ── Column config builder ────────────────────────────────────────
 
-def _build_column_config(df, editable=False):
+def _build_column_config(df):
     """Build st.column_config dict with proper types, labels, and formats."""
 
     quantity_cols = {
@@ -433,30 +507,17 @@ def _build_column_config(df, editable=False):
     for col in df.columns:
         label = COLUMN_LABELS.get(col, col.replace('_', ' ').title())
 
-        if col == 'etd' and editable:
-            config[col] = st.column_config.DateColumn(
-                label,
-                help="Click to change ETD",
-            )
-            continue
-
         if col in quantity_cols:
-            config[col] = st.column_config.NumberColumn(
-                label, format="%,.0f", disabled=True,
-            )
+            config[col] = st.column_config.NumberColumn(label, format="%,.0f")
         elif col in rate_cols:
             config[col] = st.column_config.ProgressColumn(
                 label, format="%.1f%%", min_value=0, max_value=100,
             )
         elif col in currency_cols:
-            config[col] = st.column_config.NumberColumn(
-                label, format="%,.2f", disabled=True,
-            )
+            config[col] = st.column_config.NumberColumn(label, format="%,.2f")
         elif col == 'days_overdue':
-            config[col] = st.column_config.NumberColumn(
-                label, format="%,.0f", disabled=True,
-            )
+            config[col] = st.column_config.NumberColumn(label, format="%,.0f")
         else:
-            config[col] = st.column_config.TextColumn(label, disabled=True)
+            config[col] = st.column_config.TextColumn(label)
 
     return config
