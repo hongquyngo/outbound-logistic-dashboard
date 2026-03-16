@@ -14,6 +14,7 @@ from utils.delivery_schedule import (
     needs_completed_data,
     apply_client_filters,
     calculate_fulfillment,
+    render_user_guide,
 )
 
 # ── Page config & auth ───────────────────────────────────────────
@@ -74,6 +75,7 @@ def _load_smart(data_loader, filters):
 
 def main():
     st.title("📊 Delivery Schedule")
+    render_user_guide()
 
     # Filters (form — no rerun until submit)
     filter_options = data_loader.get_filter_options()

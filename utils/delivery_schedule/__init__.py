@@ -15,6 +15,7 @@ from .pivot import display_pivot_table
 from .detailed_list import display_detailed_list
 from .alerts import display_overdue_alert
 from .email_notifications import display_email_notifications
+from .user_guide import render_user_guide
 
 __all__ = [
     # Data & services
@@ -31,4 +32,5 @@ __all__ = [
     'display_detailed_list',
     'display_overdue_alert',
     'display_email_notifications',
+    'render_user_guide',
 ]
