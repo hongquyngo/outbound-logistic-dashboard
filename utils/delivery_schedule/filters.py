@@ -130,8 +130,8 @@ def create_filter_section(filter_options):
                 "brands",
             )
 
-        # ROW 3: Location & Company Type
-        r4c1, r4c2, r4c3, r4c4 = st.columns(4)
+        # ROW 3: Location, Company Type & Inventory option
+        r4c1, r4c2, r4c3, r4c4, r4c5 = st.columns([2, 2, 2, 2, 1.5])
         with r4c1:
             selected_states = st.multiselect(
                 "State/Province",
@@ -166,6 +166,14 @@ def create_filter_section(filter_options):
                 options=filter_options.get('foreign_options', ["All Customers"]),
                 index=0, key="foreign_filter",
             )
+        with r4c5:
+            st.markdown("")  # vertical spacer
+            include_expired = st.checkbox(
+                "📦 Include expired stock",
+                value=True,
+                key="include_expired_inventory",
+                help="Include expired inventory in fulfillment rate calculation",
+            )
 
         # Submit
         st.form_submit_button(
@@ -176,6 +184,7 @@ def create_filter_section(filter_options):
     filters = {
         'date_from': resolved_from,
         'date_to': resolved_to,
+        'include_expired': include_expired,
         'creators': selected_creators or None,
         'exclude_creators': exclude_creators,
         'customers': selected_customers or None,

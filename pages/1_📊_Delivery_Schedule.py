@@ -13,6 +13,7 @@ from utils.delivery_schedule import (
     display_email_notifications,
     needs_completed_data,
     apply_client_filters,
+    calculate_fulfillment,
 )
 
 # ── Page config & auth ───────────────────────────────────────────
@@ -31,17 +32,18 @@ email_sender = EmailSender()
 # ── Smart data loading ───────────────────────────────────────────
 
 def _load_smart(data_loader, filters):
-    """Two-tier cache: DB hit only when completed-data scope changes.
+    """Two-tier cache + dynamic fulfillment.
 
     Tier 1 — st.cache_data inside load_base_data (TTL 5 min, keyed by
              include_completed bool).  Two possible cached DataFrames.
     Tier 2 — client-side pandas filtering on the cached DataFrame.
-             Instant, no DB round-trip.
+    Tier 3 — fulfillment recalculation on filtered result.
 
     Flow:
       1. Determine if current filters need completed rows.
       2. Call load_base_data(include_completed) — cache hit most of the time.
       3. Apply every other filter client-side.
+      4. Recalculate fulfillment on filtered data.
     """
     include_completed = needs_completed_data(filters)
 
@@ -57,6 +59,14 @@ def _load_smart(data_loader, filters):
 
     # Client-side filtering — sub-second
     df = apply_client_filters(df_base, filters)
+
+    if df is None or df.empty:
+        return None
+
+    # Recalculate fulfillment on filtered data
+    include_expired = filters.get('include_expired', True)
+    df = calculate_fulfillment(df, include_expired=include_expired)
+
     return df
 
 
@@ -69,7 +79,7 @@ def main():
     filter_options = data_loader.get_filter_options()
     filters = create_filter_section(filter_options)
 
-    # Load data — smart 2-tier cache
+    # Load data — smart 2-tier cache + dynamic fulfillment
     df = _load_smart(data_loader, filters)
 
     if df is None or df.empty:
@@ -85,9 +95,12 @@ def main():
         st.session_state.selected_pt_codes = None
 
     # Always load ALL active deliveries for overdue alert (cached — no extra DB hit)
+    # Also recalculate fulfillment on full active data for the Overdue + OOS metrics
+    include_expired = filters.get('include_expired', True)
     df_all_active = data_loader.load_base_data(include_completed=False)
+    df_all_active = calculate_fulfillment(df_all_active, include_expired=include_expired)
 
-    # KPI cards — overdue computed from full active data, rest from filtered
+    # KPI cards — overdue/OOS from full active data, rest from filtered
     display_metrics(df, df_all_active)
 
     # Tabs — each @st.fragment runs independently

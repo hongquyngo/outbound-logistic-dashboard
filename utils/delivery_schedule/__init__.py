@@ -1,11 +1,12 @@
 # utils/delivery_schedule/__init__.py
 """Delivery Schedule modules — all page logic lives here"""
 
-# Data & services (moved from utils/)
+# Data & services
 from .data_loader import DeliveryDataLoader
 from .email_sender import EmailSender
 from .calendar_utils import CalendarEventGenerator
 from .client_filters import needs_completed_data, apply_client_filters
+from .fulfillment import calculate_fulfillment
 
 # UI fragments
 from .filters import create_filter_section
@@ -22,6 +23,7 @@ __all__ = [
     'CalendarEventGenerator',
     'needs_completed_data',
     'apply_client_filters',
+    'calculate_fulfillment',
     # UI
     'create_filter_section',
     'display_metrics',

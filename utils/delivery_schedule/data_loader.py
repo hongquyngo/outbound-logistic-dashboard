@@ -45,6 +45,8 @@ class DeliveryDataLoader:
                 remaining_quantity_to_deliver,
                 total_instock_at_preferred_warehouse,
                 total_instock_all_warehouses,
+                total_instock_at_preferred_warehouse_valid,
+                total_instock_all_warehouses_valid,
                 gap_quantity, fulfill_rate_percent, fulfillment_status,
                 product_total_remaining_demand, product_active_delivery_count,
                 product_gap_quantity, product_fulfill_rate_percent,
