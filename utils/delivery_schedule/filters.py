@@ -14,34 +14,34 @@ def create_filter_section(filter_options):
     else stays inside the form to prevent full-page reruns.
     """
 
-    # ── Exclude checkbox styling (absolute-positioned, no sub-columns) ──
+    # ── Exclude checkbox styling ────────────────────────────────
+    #   Checkbox renders BEFORE multiselect → first child in DOM.
+    #   CSS absolute-positions it to top-right of the column.
     st.markdown("""
     <style>
-        /* Columns with both multiselect + checkbox: relative container */
-        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]):has([data-testid="stCheckbox"]) {
+        /* Form columns: positioning context */
+        [data-testid="stForm"] [data-testid="stColumn"] {
             position: relative;
         }
-        /* Float checkbox to top-right corner of the label line */
-        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) > [data-testid="stElementContainer"]:has([data-testid="stCheckbox"]) {
+        /* All checkboxes in form columns: top-right corner */
+        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] {
             position: absolute;
-            top: -0.15rem;
+            top: 0.15rem;
             right: 0;
-            z-index: 1;
-            width: auto !important;
+            z-index: 2;
         }
-        /* Shrink checkbox itself */
-        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) [data-testid="stCheckbox"] > label {
+        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] > label {
             gap: 0.2rem;
             min-height: unset;
             padding: 0;
             align-items: center;
         }
-        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) [data-testid="stCheckbox"] > label p {
+        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] > label p {
             font-size: 0.7rem !important;
             color: rgba(140,140,140,0.9);
             line-height: 1;
         }
-        [data-testid="stColumn"]:has([data-testid="stMultiSelect"]) [data-testid="stCheckbox"] > label > div[role="checkbox"] {
+        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] > label > div[role="checkbox"] {
             width: 0.8rem;
             height: 0.8rem;
             min-width: 0.8rem;
@@ -169,14 +169,14 @@ def create_filter_section(filter_options):
                 placeholder="All states", key="filter_states",
             )
         with r4c2:
+            exclude_countries = st.checkbox(
+                "Excl", key="exclude_countries", value=False,
+                help="Exclude selected countries",
+            )
             selected_countries = st.multiselect(
                 "Country",
                 options=filter_options.get('countries', []),
                 placeholder="All countries", key="filter_countries",
-            )
-            exclude_countries = st.checkbox(
-                "Excl", key="exclude_countries", value=False,
-                help="Exclude selected countries",
             )
         with r4c3:
             epe_filter = st.selectbox(
@@ -252,16 +252,17 @@ def _resolve_date_preset(preset, date_from, date_to, today, data_min, data_max):
 
 
 def _multiselect_excl(label, options, key_prefix, default=None, excl_default=False):
-    """Multiselect with tiny Excl checkbox floated to top-right of label.
+    """Multiselect with Excl checkbox floated to top-right of label.
 
-    No sub-columns — CSS positions the checkbox absolutely.
+    Checkbox renders FIRST so CSS can absolute-position it.
+    Multiselect renders with its native label below.
     """
-    selected = st.multiselect(
-        label, options=options, default=default,
-        placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}",
-    )
     exclude = st.checkbox(
         "Excl", key=f"exclude_{key_prefix}", value=excl_default,
         help=f"Exclude selected {label.lower()}",
+    )
+    selected = st.multiselect(
+        label, options=options, default=default,
+        placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}",
     )
     return selected, exclude
