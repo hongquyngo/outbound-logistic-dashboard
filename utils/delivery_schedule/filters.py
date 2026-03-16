@@ -14,40 +14,10 @@ def create_filter_section(filter_options):
     else stays inside the form to prevent full-page reruns.
     """
 
-    # ── Exclude checkbox styling ────────────────────────────────
-    #   Checkbox renders BEFORE multiselect → first child in DOM.
-    #   CSS absolute-positions it to top-right of the column.
+    # ── Minimal styling ─────────────────────────────────────────
     st.markdown("""
     <style>
-        /* Form columns: positioning context */
-        [data-testid="stForm"] [data-testid="stColumn"] {
-            position: relative;
-        }
-        /* All checkboxes in form columns: top-right corner */
-        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] {
-            position: absolute;
-            top: 0.15rem;
-            right: 0;
-            z-index: 2;
-        }
-        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] > label {
-            gap: 0.2rem;
-            min-height: unset;
-            padding: 0;
-            align-items: center;
-        }
-        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] > label p {
-            font-size: 0.7rem !important;
-            color: rgba(140,140,140,0.9);
-            line-height: 1;
-        }
-        [data-testid="stForm"] [data-testid="stColumn"] [data-testid="stCheckbox"] > label > div[role="checkbox"] {
-            width: 0.8rem;
-            height: 0.8rem;
-            min-width: 0.8rem;
-        }
-
-        /* ── Overdue popover: full width ── */
+        /* Overdue popover: full width */
         [data-testid="stPopoverBody"] {
             width: calc(100vw - 6rem);
             max-width: calc(100vw - 6rem);
@@ -169,15 +139,21 @@ def create_filter_section(filter_options):
                 placeholder="All states", key="filter_states",
             )
         with r4c2:
-            exclude_countries = st.checkbox(
-                "Excl", key="exclude_countries", value=False,
-                help="Exclude selected countries",
-            )
-            selected_countries = st.multiselect(
-                "Country",
-                options=filter_options.get('countries', []),
-                placeholder="All countries", key="filter_countries",
-            )
+            cc, xc = st.columns([6, 1])
+            with cc:
+                selected_countries = st.multiselect(
+                    "Country",
+                    options=filter_options.get('countries', []),
+                    placeholder="All countries", key="filter_countries",
+                )
+            with xc:
+                st.markdown("<div style='margin-top:0.2rem'><small style='color:#999'>Excl</small></div>",
+                             unsafe_allow_html=True)
+                exclude_countries = st.checkbox(
+                    "Excl", key="exclude_countries", value=False,
+                    help="Exclude selected countries",
+                    label_visibility="collapsed",
+                )
         with r4c3:
             epe_filter = st.selectbox(
                 "EPE Company",
@@ -252,17 +228,23 @@ def _resolve_date_preset(preset, date_from, date_to, today, data_min, data_max):
 
 
 def _multiselect_excl(label, options, key_prefix, default=None, excl_default=False):
-    """Multiselect with Excl checkbox floated to top-right of label.
+    """Multiselect (full label) + icon-only exclude checkbox beside it.
 
-    Checkbox renders FIRST so CSS can absolute-position it.
-    Multiselect renders with its native label below.
+    Layout:  [ ──── multiselect with label ──── ] [☑]
+    The checkbox column is just wide enough for the tick box.
     """
-    exclude = st.checkbox(
-        "Excl", key=f"exclude_{key_prefix}", value=excl_default,
-        help=f"Exclude selected {label.lower()}",
-    )
-    selected = st.multiselect(
-        label, options=options, default=default,
-        placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}",
-    )
+    mc, xc = st.columns([6, 1])
+    with mc:
+        selected = st.multiselect(
+            label, options=options, default=default,
+            placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}",
+        )
+    with xc:
+        st.markdown("<div style='margin-top:0.2rem'><small style='color:#999'>Excl</small></div>",
+                     unsafe_allow_html=True)
+        exclude = st.checkbox(
+            "Excl", key=f"exclude_{key_prefix}", value=excl_default,
+            help=f"Exclude selected {label.lower()}",
+            label_visibility="collapsed",
+        )
     return selected, exclude
