@@ -10,7 +10,6 @@ from utils.delivery_schedule import (
     display_metrics,
     display_pivot_table,
     display_detailed_list,
-    display_overdue_alert,
     display_email_notifications,
     needs_completed_data,
     apply_client_filters,
@@ -101,9 +100,6 @@ def main():
         display_detailed_list(df)
     with tab3:
         display_email_notifications(data_loader, email_sender)
-
-    # Alerts
-    display_overdue_alert(df)
 
     # Footer
     st.markdown("---")
