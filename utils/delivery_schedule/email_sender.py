@@ -1674,3 +1674,192 @@ class EmailSender:
         except Exception as e:
             logger.error(f"Error sending customs email: {e}", exc_info=True)
             return False, str(e)
+
+    # ── ETD Update Notification ──────────────────────────────────
+
+    def send_etd_update_notification(
+        self,
+        to_email,
+        to_name,
+        changes,
+        updated_by_name,
+        updated_by_email="",
+        cc_emails=None,
+        reason="",
+    ):
+        """Send ETD change notification email.
+
+        Parameters
+        ----------
+        to_email : str
+            Creator / primary recipient.
+        to_name : str
+            Friendly name for greeting.
+        changes : list[dict]
+            Each dict has: delivery_id, dn_number, customer,
+            recipient_company, old_etd, new_etd.
+        updated_by_name : str
+            Who made the change.
+        updated_by_email : str
+            Email of the person who made the change (for CC).
+        cc_emails : list[str]
+            Additional CC addresses (e.g. dn_update@prostech.vn).
+        reason : str
+            Optional reason text.
+
+        Returns
+        -------
+        (bool, str)
+        """
+        try:
+            if not self.sender_email or not self.sender_password:
+                return False, "Email configuration missing."
+
+            # ── Build subject ────────────────────────────────────
+            dn_count = len(changes)
+            dn_list_short = ", ".join(
+                str(c['dn_number']) for c in changes[:3]
+            )
+            if dn_count > 3:
+                dn_list_short += f" (+{dn_count - 3} more)"
+
+            subject = (
+                f"📅 ETD Updated — {dn_count} Delivery"
+                f"{'s' if dn_count > 1 else ''}: {dn_list_short}"
+            )
+
+            # ── Build HTML body ──────────────────────────────────
+            html = self._build_etd_update_html(
+                to_name, changes, updated_by_name,
+                updated_by_email, reason,
+            )
+
+            # ── Compose MIME message ─────────────────────────────
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = self.sender_email
+            msg['To'] = to_email
+
+            if cc_emails:
+                msg['Cc'] = ', '.join(cc_emails)
+
+            msg.attach(MIMEText(html, 'html'))
+
+            # ── Send ─────────────────────────────────────────────
+            recipients = [to_email]
+            if cc_emails:
+                recipients.extend(cc_emails)
+
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                server.sendmail(self.sender_email, recipients, msg.as_string())
+
+            logger.info(
+                f"ETD update email sent to {to_email} "
+                f"(CC: {cc_emails}) for {dn_count} DN(s)"
+            )
+            return True, "Email sent"
+
+        except smtplib.SMTPAuthenticationError:
+            error_msg = "Email auth failed — check credentials."
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            logger.error(f"ETD notification email error: {e}", exc_info=True)
+            return False, str(e)
+
+    def _build_etd_update_html(
+        self, to_name, changes, updated_by_name,
+        updated_by_email, reason,
+    ):
+        """Compose the ETD-change notification HTML."""
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+        dn_count = len(changes)
+
+        # ── Table rows ───────────────────────────────────────────
+        rows_html = ""
+        for ch in changes:
+            old_str = str(ch['old_etd']) if ch.get('old_etd') else '—'
+            new_str = str(ch['new_etd']) if ch.get('new_etd') else '—'
+            rows_html += f"""
+            <tr>
+                <td style="padding:8px;border-bottom:1px solid #e0e0e0;">{ch.get('dn_number','')}</td>
+                <td style="padding:8px;border-bottom:1px solid #e0e0e0;">{ch.get('customer','')}</td>
+                <td style="padding:8px;border-bottom:1px solid #e0e0e0;">{ch.get('recipient_company','')}</td>
+                <td style="padding:8px;border-bottom:1px solid #e0e0e0;text-decoration:line-through;color:#999;">{old_str}</td>
+                <td style="padding:8px;border-bottom:1px solid #e0e0e0;font-weight:bold;color:#1565c0;">{new_str}</td>
+            </tr>"""
+
+        reason_section = ""
+        if reason:
+            reason_section = f"""
+            <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:5px;
+                        padding:12px;margin:16px 0;">
+                <strong>📝 Reason:</strong> {reason}
+            </div>"""
+
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; color: #333; line-height: 1.6; }}
+            </style>
+        </head>
+        <body>
+            <div style="background:#1565c0;color:white;padding:20px;text-align:center;">
+                <h2 style="margin:0;">📅 ETD Update Notification</h2>
+                <p style="margin:4px 0 0 0;opacity:0.9;">
+                    {dn_count} delivery{'s' if dn_count > 1 else ''} updated
+                </p>
+            </div>
+
+            <div style="padding:20px;">
+                <p>Dear {to_name},</p>
+
+                <p>
+                    <strong>{updated_by_name}</strong>
+                    {f'({updated_by_email})' if updated_by_email else ''}
+                    has updated the Estimated Time of Delivery (ETD) for the
+                    following delivery note{'s' if dn_count > 1 else ''}:
+                </p>
+
+                {reason_section}
+
+                <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                    <thead>
+                        <tr style="background:#f5f5f5;">
+                            <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">DN Number</th>
+                            <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">Customer</th>
+                            <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">Ship To</th>
+                            <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">Old ETD</th>
+                            <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">New ETD</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows_html}
+                    </tbody>
+                </table>
+
+                <div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:5px;
+                            padding:12px;margin:16px 0;">
+                    <strong>ℹ️ Note:</strong> Please review the updated schedule and coordinate
+                    with the warehouse / customer if necessary. If this change is incorrect,
+                    please contact {updated_by_name} or reply to this email.
+                </div>
+
+                <p style="color:#999;font-size:12px;margin-top:24px;">
+                    Updated at {now_str} · Outbound Logistics System · Prostech
+                </p>
+            </div>
+
+            <div style="background:#f5f5f5;padding:16px;text-align:center;font-size:12px;color:#999;">
+                This is an automated notification from the Delivery Schedule system.<br>
+                For questions, contact:
+                <a href="mailto:dn_update@prostech.vn">dn_update@prostech.vn</a>
+            </div>
+        </body>
+        </html>
+        """
+        return html

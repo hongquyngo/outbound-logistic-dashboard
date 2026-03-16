@@ -113,7 +113,7 @@ def main():
     with tab1:
         display_pivot_table(df, data_loader)
     with tab2:
-        display_detailed_list(df)
+        display_detailed_list(df, data_loader, email_sender)
     with tab3:
         display_email_notifications(data_loader, email_sender)
 

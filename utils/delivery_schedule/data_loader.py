@@ -84,7 +84,118 @@ class DeliveryDataLoader:
         except Exception as e:
             logger.error(f"Error loading base data: {e}")
             return pd.DataFrame()
-    
+
+    # ── ETD Update ───────────────────────────────────────────────
+
+    def update_delivery_etd(self, delivery_id, new_etd, updated_by="System", reason=""):
+        """Update ETD for a delivery and log the change.
+
+        Updates `stock_out_delivery.adjust_etd_date` — the view uses
+        COALESCE(adjust_etd_date, etd_date) so this takes priority
+        while preserving the original etd_date.
+
+        Also inserts an audit row into `delivery_etd_change_log`.
+
+        Parameters
+        ----------
+        delivery_id : int
+            The delivery_id (= stock_out_delivery.id).
+        new_etd : date
+            New estimated time of delivery.
+        updated_by : str
+            Name of the user making the change.
+        reason : str
+            Optional reason / note.
+
+        Returns
+        -------
+        (bool, str)  — success flag + message
+        """
+        try:
+            with self.engine.begin() as conn:
+                # 1. Fetch current ETD + DN for audit log
+                old_row = conn.execute(
+                    text("""
+                        SELECT 
+                            DATE(COALESCE(adjust_etd_date, etd_date)) AS current_etd,
+                            dn_number
+                        FROM stock_out_delivery
+                        WHERE id = :did AND delete_flag = 0
+                        LIMIT 1
+                    """),
+                    {"did": delivery_id},
+                ).fetchone()
+
+                if not old_row:
+                    return False, f"Delivery ID {delivery_id} not found"
+
+                old_etd = old_row[0]
+                dn_number = old_row[1]
+
+                # 2. Update adjust_etd_date (keeps original etd_date intact)
+                result = conn.execute(
+                    text("""
+                        UPDATE stock_out_delivery
+                        SET adjust_etd_date = :new_etd,
+                            modified_date = NOW(),
+                            etd_update_count = IFNULL(etd_update_count, 0) + 1
+                        WHERE id = :did
+                          AND delete_flag = 0
+                    """),
+                    {
+                        "new_etd": new_etd,
+                        "did": delivery_id,
+                    },
+                )
+
+                rows_affected = result.rowcount
+
+                if rows_affected == 0:
+                    return False, f"No rows updated for delivery_id={delivery_id}"
+
+                # 3. Audit log (create table if not exists — idempotent)
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS delivery_etd_change_log (
+                        id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        delivery_id     BIGINT NOT NULL,
+                        dn_number       VARCHAR(50),
+                        old_etd         DATE,
+                        new_etd         DATE NOT NULL,
+                        changed_by      VARCHAR(100) NOT NULL,
+                        reason          TEXT,
+                        changed_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_del_etdlog_delivery (delivery_id),
+                        INDEX idx_del_etdlog_changed  (changed_at)
+                    )
+                """))
+
+                conn.execute(
+                    text("""
+                        INSERT INTO delivery_etd_change_log
+                            (delivery_id, dn_number, old_etd, new_etd, changed_by, reason)
+                        VALUES
+                            (:did, :dn, :old_etd, :new_etd, :changed_by, :reason)
+                    """),
+                    {
+                        "did": delivery_id,
+                        "dn": dn_number,
+                        "old_etd": old_etd,
+                        "new_etd": new_etd,
+                        "changed_by": updated_by,
+                        "reason": reason or None,
+                    },
+                )
+
+            logger.info(
+                f"[ETD Update] delivery_id={delivery_id} dn={dn_number} "
+                f"old={old_etd} → new={new_etd} by {updated_by}"
+            )
+            return True, f"Updated DN {dn_number}"
+
+        except Exception as e:
+            logger.error(f"ETD update failed for delivery_id={delivery_id}: {e}")
+            return False, str(e)
+
     @st.cache_data(ttl=300)  # Cache for 5 minutes
     def load_delivery_data(_self, filters=None):
         """Load delivery data from delivery_full_view"""
