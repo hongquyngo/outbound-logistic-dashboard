@@ -17,7 +17,7 @@ def display_email_notifications(data_loader, email_sender):
 
     # Role check
     user_role = st.session_state.get('user_role', '')
-    if user_role not in ['admin', 'manager', 'logistics_manager', 'supply_chain']:
+    if user_role not in ['supply_chain_manager', 'outbound_manager', 'supply_chain']:
         st.warning("🔒 You need admin/manager/logistics role to send emails.")
         return
 

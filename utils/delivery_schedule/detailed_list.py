@@ -125,7 +125,7 @@ def display_detailed_list(df, data_loader=None, email_sender=None):
         data_loader is not None
         and email_sender is not None
         and st.session_state.get('user_role', '') in (
-            'admin', 'manager', 'logistics_manager', 'supply_chain', 'sales',
+            'supply_chain_manager', 'outbound_manager', 'supply_chain',
         )
     )
 

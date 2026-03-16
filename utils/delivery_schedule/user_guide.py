@@ -470,8 +470,8 @@ Tương tự, Fulfill Rate % > 100% nghĩa là tồn kho gấp nhiều lần nhu
     with st.expander("**Tôi cần gửi email nhưng không thấy tab Email Notifications?**"):
         st.markdown("""
 Tab **📧 Email Notifications** luôn hiển thị, nhưng chức năng gửi email chỉ khả dụng
-cho các role: **admin**, **manager**, **logistics_manager**, **supply_chain**.
+cho các role: **supply_chain_manager**, **outbound_manager**, **supply_chain**.
 
-Nếu bạn có role **sales**, bạn vẫn có thể sửa ETD nhưng không gửi được email hàng loạt.
+Các role này cũng là những role duy nhất có thể sửa ETD. Tất cả role khác chỉ có quyền xem.
 Liên hệ quản trị viên nếu cần nâng quyền.
 """)
