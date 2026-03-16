@@ -30,44 +30,44 @@ data_loader = DeliveryDataLoader()
 email_sender = EmailSender()
 
 
-# ── Smart data loading ───────────────────────────────────────────
+# ── Smart data loading with progress ─────────────────────────────
 
-def _load_smart(data_loader, filters):
-    """Two-tier cache + dynamic fulfillment.
+def _load_smart(data_loader, filters, progress, status):
+    """Two-tier cache + dynamic fulfillment with progress feedback.
 
     Tier 1 — st.cache_data inside load_base_data (TTL 5 min, keyed by
              include_completed bool).  Two possible cached DataFrames.
     Tier 2 — client-side pandas filtering on the cached DataFrame.
     Tier 3 — fulfillment recalculation on filtered result.
-
-    Flow:
-      1. Determine if current filters need completed rows.
-      2. Call load_base_data(include_completed) — cache hit most of the time.
-      3. Apply every other filter client-side.
-      4. Recalculate fulfillment on filtered data.
     """
     include_completed = needs_completed_data(filters)
 
-    with st.spinner(
-        "Loading all deliveries (incl. completed)..."
-        if include_completed
-        else "Loading active deliveries..."
-    ):
-        df_base = data_loader.load_base_data(include_completed)
+    # Step 1 — Load from DB (or cache)
+    status.markdown(
+        "⏳ **Loading data** — "
+        + ("all deliveries (incl. completed)..." if include_completed else "active deliveries...")
+    )
+    progress.progress(20, text="Loading deliveries...")
+    df_base = data_loader.load_base_data(include_completed)
 
     if df_base is None or df_base.empty:
         return None
 
-    # Client-side filtering — sub-second
+    # Step 2 — Apply filters
+    status.markdown("🔍 **Applying filters...**")
+    progress.progress(50, text="Applying filters...")
     df = apply_client_filters(df_base, filters)
 
     if df is None or df.empty:
         return None
 
-    # Recalculate fulfillment on filtered data
+    # Step 3 — Recalculate fulfillment
+    status.markdown("📊 **Calculating fulfillment...**")
+    progress.progress(75, text="Calculating fulfillment...")
     include_expired = filters.get('include_expired', True)
     df = calculate_fulfillment(df, include_expired=include_expired)
 
+    progress.progress(100, text="Done!")
     return df
 
 
@@ -77,16 +77,44 @@ def main():
     st.title("📊 Delivery Schedule")
     render_user_guide()
 
-    # Filters (form — no rerun until submit)
+    # Step 0 — Load filter options
+    progress = st.progress(0, text="Initializing...")
+    status = st.empty()
+
+    status.markdown("⚙️ **Loading filter options...**")
+    progress.progress(10, text="Loading filter options...")
     filter_options = data_loader.get_filter_options()
+
+    # Clear progress while user interacts with filters
+    progress.empty()
+    status.empty()
+
+    # Filters (form — no rerun until submit)
     filters = create_filter_section(filter_options)
 
+    # Re-create progress bar for data loading phase
+    progress = st.progress(0, text="Loading data...")
+    status = st.empty()
+
     # Load data — smart 2-tier cache + dynamic fulfillment
-    df = _load_smart(data_loader, filters)
+    df = _load_smart(data_loader, filters, progress, status)
 
     if df is None or df.empty:
+        progress.empty()
+        status.empty()
         st.info("No delivery data found for the selected filters")
         return
+
+    # Step 4 — Load overdue data
+    status.markdown("⚠️ **Loading overdue data...**")
+    progress.progress(85, text="Loading overdue data...")
+    include_expired = filters.get('include_expired', True)
+    df_all_active = data_loader.load_base_data(include_completed=False)
+    df_all_active = calculate_fulfillment(df_all_active, include_expired=include_expired)
+
+    # Step 5 — Rendering
+    status.markdown("🎨 **Rendering UI...**")
+    progress.progress(95, text="Rendering UI...")
 
     # Track selected PT codes for cross-page use
     if filters.get('products'):
@@ -96,11 +124,11 @@ def main():
     else:
         st.session_state.selected_pt_codes = None
 
-    # Always load ALL active deliveries for overdue alert (cached — no extra DB hit)
-    # Also recalculate fulfillment on full active data for the Overdue + OOS metrics
-    include_expired = filters.get('include_expired', True)
-    df_all_active = data_loader.load_base_data(include_completed=False)
-    df_all_active = calculate_fulfillment(df_all_active, include_expired=include_expired)
+    # Done — clear progress
+    progress.progress(100, text="✅ Done!")
+    import time; time.sleep(0.3)  # brief flash so user sees "Done"
+    progress.empty()
+    status.empty()
 
     # KPI cards — overdue/OOS from full active data, rest from filtered
     display_metrics(df, df_all_active)
