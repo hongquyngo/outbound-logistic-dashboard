@@ -47,12 +47,7 @@ def display_metrics(df, df_all_active=None):
     with c4:
         overdue_df = overdue_source[overdue_source['delivery_timeline_status'] == 'Overdue']
         overdue_count = overdue_df['delivery_id'].nunique()
-        st.metric(
-            "⚠️ Overdue",
-            f"{overdue_count:,}",
-            delta=f"{overdue_count} need attention" if overdue_count > 0 else None,
-            delta_color="inverse" if overdue_count > 0 else "off",
-        )
+        st.metric("⚠️ Overdue", f"{overdue_count:,}")
         if overdue_count > 0:
             _render_overdue_popover(overdue_df)
 
@@ -61,8 +56,11 @@ def display_metrics(df, df_all_active=None):
         st.metric("Avg Fulfill %", f"{avg_rate:.1f}%")
 
     with c6:
-        oos = df[df['product_fulfillment_status'] == 'Out of Stock']['product_id'].nunique()
+        oos_df = df[df['product_fulfillment_status'] == 'Out of Stock']
+        oos = oos_df['product_id'].nunique()
         st.metric("Out of Stock", f"{oos:,}")
+        if oos > 0:
+            _render_oos_popover(oos_df)
 
 
 def _render_overdue_popover(overdue_df):
@@ -97,4 +95,87 @@ def _render_overdue_popover(overdue_df):
             .bar(subset=['Total Qty'], color='#ff6b6b'),
             use_container_width=True,
             hide_index=True,
+        )
+
+
+def _render_oos_popover(oos_df):
+    """Popover with out-of-stock summary: product → customer → DN detail."""
+    with st.popover("🔍 View out-of-stock details", use_container_width=True):
+
+        # ── Summary by product ───────────────────────────────────
+        st.markdown("**By Product**")
+
+        # Build optional columns dynamically
+        agg_dict = dict(
+            DNs=('dn_number', 'nunique'),
+            Customers=('customer', 'nunique'),
+            Remaining_Qty=('remaining_quantity_to_deliver', 'sum'),
+        )
+        group_cols = ['pt_code', 'product_pn']
+        group_cols = [c for c in group_cols if c in oos_df.columns]
+
+        if not group_cols:
+            st.info("No product columns available for summary.")
+            return
+
+        product_summary = (
+            oos_df
+            .groupby(group_cols)
+            .agg(**agg_dict)
+            .reset_index()
+            .rename(columns={
+                'pt_code': 'PT Code',
+                'product_pn': 'Product',
+                'Remaining_Qty': 'Remaining Qty',
+            })
+            .sort_values('Remaining Qty', ascending=False)
+        )
+
+        st.dataframe(
+            product_summary.style
+            .format({
+                'Remaining Qty': '{:,.0f}',
+                'DNs': '{:,.0f}',
+                'Customers': '{:,.0f}',
+            }, na_rep='-')
+            .bar(subset=['Remaining Qty'], color='#ff9999'),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # ── Detail by customer + DN ──────────────────────────────
+        st.markdown("**By Customer / DN**")
+
+        detail_cols = ['dn_number', 'customer', 'recipient_company',
+                       'pt_code', 'product_pn', 'brand', 'etd',
+                       'remaining_quantity_to_deliver']
+        detail_cols = [c for c in detail_cols if c in oos_df.columns]
+
+        detail_df = (
+            oos_df[detail_cols]
+            .drop_duplicates()
+            .sort_values(
+                [c for c in ['customer', 'etd', 'dn_number'] if c in detail_cols]
+            )
+            .rename(columns={
+                'dn_number': 'DN Number',
+                'customer': 'Customer',
+                'recipient_company': 'Ship To',
+                'pt_code': 'PT Code',
+                'product_pn': 'Product',
+                'brand': 'Brand',
+                'etd': 'ETD',
+                'remaining_quantity_to_deliver': 'Remaining Qty',
+            })
+        )
+
+        fmt = {}
+        if 'Remaining Qty' in detail_df.columns:
+            fmt['Remaining Qty'] = '{:,.0f}'
+
+        st.dataframe(
+            detail_df.style.format(fmt, na_rep='-'),
+            use_container_width=True,
+            hide_index=True,
+            height=min(400, 40 + len(detail_df) * 35),
         )
