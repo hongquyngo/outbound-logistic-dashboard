@@ -59,13 +59,13 @@ def display_pivot_table(df, data_loader):
         return
 
     # ── Configuration row ────────────────────────────────────────
-    cfg1, cfg2, cfg3, cfg4 = st.columns([2, 1.5, 1.5, 1])
+    cfg1, cfg2, cfg3, cfg4, cfg5 = st.columns([2, 1.5, 1.5, 1, 1])
 
     with cfg1:
         row_labels = st.multiselect(
             "Rows",
             options=list(avail_row_opts.keys()),
-            default=["Customer"],
+            default=["State/Province", "Ship-To Company"],
             help="Group data by these fields (left side of pivot)",
         )
 
@@ -80,7 +80,7 @@ def display_pivot_table(df, data_loader):
     with cfg3:
         if col_mode == "Time Period":
             time_period_label = st.selectbox(
-                "Period", options=list(TIME_PERIOD_OPTIONS.keys()), index=1,
+                "Period", options=list(TIME_PERIOD_OPTIONS.keys()), index=0,
             )
             col_field = None
         else:
@@ -99,8 +99,7 @@ def display_pivot_table(df, data_loader):
         val_label = st.selectbox("Value", options=list(avail_val_opts.keys()), index=0)
         val_col, default_agg = avail_val_opts[val_label]
 
-    # Optional: let advanced users override aggregation
-    with st.expander("⚙️ Advanced", expanded=False):
+    with cfg5:
         agg_func = st.selectbox(
             "Aggregation",
             options=AGG_OPTIONS,

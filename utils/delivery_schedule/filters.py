@@ -14,31 +14,44 @@ def create_filter_section(filter_options):
     else stays inside the form to prevent full-page reruns.
     """
 
-    # ── Compact exclude-toggle styling ──────────────────────────
+    # ── Compact exclude-checkbox styling ─────────────────────────
     st.markdown("""
     <style>
-        /* Inline label+toggle row: remove vertical gaps */
-        .excl-label-row {
+        /* ── Exclude checkbox: inline with filter label ── */
+        .excl-row {
             display: flex;
             align-items: center;
-            gap: 0;
-            margin-bottom: -1rem;
-            min-height: 1.8rem;
+            margin-bottom: -1.1rem;
+            min-height: 1.6rem;
         }
-        .excl-label-row .filter-label {
+        .excl-row .filter-label {
             font-size: 0.875rem;
             font-weight: 400;
             white-space: nowrap;
         }
-        /* Shrink the toggle widget inside the label row */
-        .excl-label-row [data-testid="stToggle"] > label {
-            gap: 0.3rem;
+        /* Shrink the checkbox widget */
+        .excl-row [data-testid="stCheckbox"] {
+            margin: 0; padding: 0;
+        }
+        .excl-row [data-testid="stCheckbox"] > label {
+            gap: 0.25rem;
             min-height: unset;
             padding: 0;
+            align-items: center;
         }
-        .excl-label-row [data-testid="stToggle"] > label p {
-            font-size: 0.78rem !important;
-            color: rgba(120,120,120,0.85);
+        .excl-row [data-testid="stCheckbox"] > label p {
+            font-size: 0.72rem !important;
+            color: rgba(130,130,130,0.9);
+            line-height: 1;
+        }
+        .excl-row [data-testid="stCheckbox"] > label > div[role="checkbox"] {
+            width: 0.85rem; height: 0.85rem;
+        }
+
+        /* ── Overdue popover: full width ── */
+        [data-testid="stPopoverBody"] {
+            width: calc(100vw - 6rem);
+            max-width: calc(100vw - 6rem);
         }
     </style>
     """, unsafe_allow_html=True)
@@ -157,18 +170,16 @@ def create_filter_section(filter_options):
                 placeholder="All states", key="filter_states",
             )
         with r4c2:
-            lc, tc = st.columns([3, 2])
+            lc, ec = st.columns([4, 1])
             with lc:
                 st.markdown(
-                    '<div class="excl-label-row">'
-                    '<span class="filter-label">Country</span>'
-                    '</div>',
+                    '<div class="excl-row"><span class="filter-label">Country</span></div>',
                     unsafe_allow_html=True,
                 )
-            with tc:
-                st.markdown('<div class="excl-label-row">', unsafe_allow_html=True)
-                exclude_countries = st.toggle(
-                    "Exclude", key="exclude_countries", value=False,
+            with ec:
+                st.markdown('<div class="excl-row">', unsafe_allow_html=True)
+                exclude_countries = st.checkbox(
+                    "Excl", key="exclude_countries", value=False,
                     help="Exclude selected countries",
                 )
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -252,25 +263,21 @@ def _resolve_date_preset(preset, date_from, date_to, today, data_min, data_max):
 
 
 def _multiselect_excl(label, options, key_prefix, default=None, excl_default=False):
-    """Compact multiselect: label + exclude toggle on one line, dropdown below."""
-    # Row 1 — label + toggle inline
-    lc, tc = st.columns([3, 2])
+    """Label + tiny Excl checkbox on one line, multiselect below."""
+    lc, ec = st.columns([4, 1])
     with lc:
         st.markdown(
-            f'<div class="excl-label-row">'
-            f'<span class="filter-label">{label}</span>'
-            f'</div>',
+            f'<div class="excl-row"><span class="filter-label">{label}</span></div>',
             unsafe_allow_html=True,
         )
-    with tc:
-        st.markdown('<div class="excl-label-row">', unsafe_allow_html=True)
-        exclude = st.toggle(
-            "Exclude", key=f"exclude_{key_prefix}", value=excl_default,
+    with ec:
+        st.markdown('<div class="excl-row">', unsafe_allow_html=True)
+        exclude = st.checkbox(
+            "Excl", key=f"exclude_{key_prefix}", value=excl_default,
             help=f"Exclude selected {label.lower()}",
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Row 2 — multiselect (own label hidden)
     selected = st.multiselect(
         label, options=options, default=default,
         placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}",
