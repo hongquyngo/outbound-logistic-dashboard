@@ -1,4 +1,4 @@
-# utils/email_sender.py - Email sending module
+# utils/delivery_schedule/email_sender.py - Email sending module
 
 import smtplib
 from email.mime.text import MIMEText
@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 import logging
 import io
 import os
-from utils.calendar_utils import CalendarEventGenerator
-from utils.config import EMAIL_SENDER, EMAIL_PASSWORD
+from .calendar_utils import CalendarEventGenerator
+from ..config import EMAIL_SENDER, EMAIL_PASSWORD
 
 logger = logging.getLogger(__name__)
 

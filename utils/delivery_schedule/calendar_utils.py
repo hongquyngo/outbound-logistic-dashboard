@@ -1,4 +1,4 @@
-# utils/calendar_utils.py - Calendar event generator for delivery schedules
+# utils/delivery_schedule/calendar_utils.py - Calendar event generator for delivery schedules
 
 from datetime import datetime, timedelta
 import uuid
@@ -655,4 +655,3 @@ END:VEVENT
         ics_content += "END:VCALENDAR"
         
         return ics_content
-
