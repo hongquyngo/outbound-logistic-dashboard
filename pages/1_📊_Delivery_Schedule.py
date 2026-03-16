@@ -10,7 +10,6 @@ from utils.delivery_schedule import (
     display_metrics,
     display_pivot_table,
     display_detailed_list,
-    display_product_analysis,
     display_overdue_alert,
     display_email_notifications,
 )
@@ -55,10 +54,9 @@ def main():
     display_metrics(df)
 
     # Tabs — each @st.fragment runs independently
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "📊 Pivot Table",
         "📋 Detailed List",
-        "🔍 Product Analysis",
         "📧 Email Notifications",
     ])
 
@@ -67,8 +65,6 @@ def main():
     with tab2:
         display_detailed_list(df)
     with tab3:
-        display_product_analysis(df, data_loader)
-    with tab4:
         display_email_notifications(data_loader, email_sender)
 
     # Alerts

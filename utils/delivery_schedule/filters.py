@@ -75,41 +75,33 @@ def create_filter_section(filter_options):
 
     # ── Main filter form ─────────────────────────────────────────
     with st.form("delivery_filters"):
-        # ROW 1: Timeline Status (full width since date is above)
-        tl_col1, tl_col2 = st.columns([5, 1])
+        # ROW 1: Timeline + Legal Entity + Creator + Customer
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+
         timeline_options = filter_options.get('timeline_statuses', [])
         default_timeline = ["Completed"] if "Completed" in timeline_options else None
-        with tl_col1:
-            selected_timeline = st.multiselect(
-                "Timeline Status", options=timeline_options,
-                default=default_timeline, placeholder="All statuses",
-                key="timeline_filter",
+        with r1c1:
+            selected_timeline, exclude_timeline = _multiselect_excl(
+                "Timeline Status", timeline_options, "timeline",
+                default=default_timeline, excl_default=True,
             )
-        with tl_col2:
-            exclude_timeline = st.checkbox(
-                "Excl", key="exclude_timeline", value=True,
-                help="Exclude selected timeline statuses",
-            )
-
-        # ROW 2: Who
-        r2c1, r2c2, r2c3 = st.columns(3)
-        with r2c1:
+        with r1c2:
             selected_legal_entities, exclude_legal_entities = _multiselect_excl(
                 "Legal Entity", filter_options.get('legal_entities', []),
                 "legal_entities",
             )
-        with r2c2:
+        with r1c3:
             selected_creators, exclude_creators = _multiselect_excl(
                 "Creator/Sales", filter_options.get('creators', []),
                 "creators",
             )
-        with r2c3:
+        with r1c4:
             selected_customers, exclude_customers = _multiselect_excl(
                 "Customer (Sold-To)", filter_options.get('customers', []),
                 "customers",
             )
 
-        # ROW 3: Where & What
+        # ROW 2: Ship-To, Product, Brand
         r3c1, r3c2, r3c3 = st.columns(3)
         with r3c1:
             selected_ship_to, exclude_ship_to = _multiselect_excl(
@@ -127,7 +119,7 @@ def create_filter_section(filter_options):
                 "brands",
             )
 
-        # ROW 4: Location & Company Type
+        # ROW 3: Location & Company Type
         r4c1, r4c2, r4c3, r4c4 = st.columns(4)
         with r4c1:
             selected_states = st.multiselect(
@@ -221,17 +213,17 @@ def _resolve_date_preset(preset, date_from, date_to, today, data_min, data_max):
         return data_min, data_max
 
 
-def _multiselect_excl(label, options, key_prefix):
+def _multiselect_excl(label, options, key_prefix, default=None, excl_default=False):
     """Compact multiselect with exclude checkbox — single-line layout."""
     col1, col2 = st.columns([5, 1])
     with col1:
         selected = st.multiselect(
-            label, options=options, default=None,
+            label, options=options, default=default,
             placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}",
         )
     with col2:
         exclude = st.checkbox(
-            "Excl", key=f"exclude_{key_prefix}",
+            "Excl", key=f"exclude_{key_prefix}", value=excl_default,
             help=f"Exclude selected {label.lower()}",
         )
     return selected, exclude

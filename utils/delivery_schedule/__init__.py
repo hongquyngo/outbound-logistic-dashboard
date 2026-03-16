@@ -11,7 +11,6 @@ from .filters import create_filter_section
 from .metrics import display_metrics
 from .pivot import display_pivot_table
 from .detailed_list import display_detailed_list
-from .product_analysis import display_product_analysis
 from .alerts import display_overdue_alert
 from .email_notifications import display_email_notifications
 
@@ -25,7 +24,6 @@ __all__ = [
     'display_metrics',
     'display_pivot_table',
     'display_detailed_list',
-    'display_product_analysis',
     'display_overdue_alert',
     'display_email_notifications',
 ]
