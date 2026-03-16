@@ -35,102 +35,144 @@ data_loader = DeliveryDataLoader()
 # ============================================================================
 
 def create_filter_section(filter_options):
-    """Create the filter section with all filter controls"""
+    """Create the filter section with all filter controls - form-based to prevent rerun"""
     
+    # Pre-compute date range info (needed before form)
+    date_range_options = filter_options.get('date_range', {})
+    today = datetime.now().date()
+    data_min = date_range_options.get('min_date', today - timedelta(days=365))
+    data_max = date_range_options.get('max_date', today + timedelta(days=365))
+    if hasattr(data_min, 'date'):
+        data_min = data_min.date()
+    if hasattr(data_max, 'date'):
+        data_max = data_max.date()
+    if data_min > data_max:
+        data_min, data_max = data_max, data_min
+    extended_min = data_min.replace(month=1, day=1)
+    extended_max = data_max.replace(month=12, day=31)
+
     with st.form("delivery_filters"):
-      with st.expander("🔍 Filters", expanded=True):
-        # First row of filters
-        col1, col2, col3 = st.columns(3)
+        # ── ROW 1: Date Range & Timeline ──────────────────────────
+        r1c1, r1c2, r1c3, r1c4 = st.columns([1.2, 1, 1, 1.8])
         
-        with col1:
-            # Date range filter - returns (date_from, date_to) tuple
-            date_from, date_to = create_date_filter(filter_options)
-            
-            # Legal Entity filter
-            selected_legal_entities, exclude_legal_entities = create_multiselect_with_exclude(
-                "Legal Entity",
-                filter_options.get('legal_entities', []),
-                "legal_entities",
-                "Filter by selling company/legal entity"
+        with r1c1:
+            preset = st.selectbox(
+                "📅 Date Range",
+                options=["All Data", "This Week", "This Month", "Next 30 Days", "Next 90 Days", "Custom"],
+                index=0, key="date_preset"
             )
         
-        with col2:
-            # Creator filter
-            selected_creators, exclude_creators = create_multiselect_with_exclude(
-                "Creator/Sales",
-                filter_options.get('creators', []),
-                "creators"
-            )
-            
-            # Customer filter
-            selected_customers, exclude_customers = create_multiselect_with_exclude(
-                "Customer (Sold-To)",
-                filter_options.get('customers', []),
-                "customers"
-            )
+        with r1c2:
+            date_from = st.date_input("From", value=data_min, min_value=extended_min,
+                                       max_value=extended_max, key="input_date_from")
         
-        with col3:
-            # Ship-to filter
-            selected_ship_to, exclude_ship_to = create_multiselect_with_exclude(
-                "Ship-To Company",
-                filter_options.get('ship_to_companies', []),
-                "ship_to"
-            )
-            
-            # Location filters
-            selected_states, selected_countries, exclude_countries = create_location_filters(filter_options)
+        with r1c3:
+            date_to = st.date_input("To", value=data_max, min_value=extended_min,
+                                     max_value=extended_max, key="input_date_to")
         
-        # Second row of filters
-        col4, col5, col6 = st.columns(3)
+        with r1c4:
+            timeline_options = filter_options.get('timeline_statuses', [])
+            default_timeline = ["Completed"] if "Completed" in timeline_options else None
+            tl_col1, tl_col2 = st.columns([5, 1])
+            with tl_col1:
+                selected_timeline = st.multiselect(
+                    "Timeline Status", options=timeline_options, default=default_timeline,
+                    placeholder="All statuses", key="timeline_filter"
+                )
+            with tl_col2:
+                exclude_timeline = st.checkbox("Excl", key="exclude_timeline", value=True,
+                                                help="Exclude selected timeline statuses")
         
-        with col4:
-            epe_filter, foreign_filter = create_company_type_filters(filter_options)
+        st.caption(f"💡 Data: **{data_min.strftime('%Y/%m/%d')}** → **{data_max.strftime('%Y/%m/%d')}** · Preset overrides manual dates unless set to **Custom**")
         
-        with col5:
-            # Product filter
-            selected_products, exclude_products = create_multiselect_with_exclude(
-                "Product",
-                filter_options.get('products', []),
-                "products",
-                "Filter by product PT Code or Product PN"
-            )
-            
-            # Brand filter
-            selected_brands, exclude_brands = create_multiselect_with_exclude(
-                "Brand",
-                filter_options.get('brands', []),
-                "brands",
-                "Filter by product brand"
-            )
+        # ── ROW 2: Who ────────────────────────────────────────────
+        r2c1, r2c2, r2c3 = st.columns(3)
         
-        with col6:
-            # Timeline status filter
-            selected_timeline, exclude_timeline = create_timeline_filter(filter_options)
+        with r2c1:
+            selected_legal_entities, exclude_legal_entities = _multiselect_excl(
+                "Legal Entity", filter_options.get('legal_entities', []), "legal_entities")
+        
+        with r2c2:
+            selected_creators, exclude_creators = _multiselect_excl(
+                "Creator/Sales", filter_options.get('creators', []), "creators")
+        
+        with r2c3:
+            selected_customers, exclude_customers = _multiselect_excl(
+                "Customer (Sold-To)", filter_options.get('customers', []), "customers")
+        
+        # ── ROW 3: Where & What ───────────────────────────────────
+        r3c1, r3c2, r3c3 = st.columns(3)
+        
+        with r3c1:
+            selected_ship_to, exclude_ship_to = _multiselect_excl(
+                "Ship-To Company", filter_options.get('ship_to_companies', []), "ship_to")
+        
+        with r3c2:
+            selected_products, exclude_products = _multiselect_excl(
+                "Product", filter_options.get('products', []), "products")
+        
+        with r3c3:
+            selected_brands, exclude_brands = _multiselect_excl(
+                "Brand", filter_options.get('brands', []), "brands")
+        
+        # ── ROW 4: Location & Company Type ────────────────────────
+        r4c1, r4c2, r4c3, r4c4 = st.columns(4)
+        
+        with r4c1:
+            selected_states = st.multiselect(
+                "State/Province", options=filter_options.get('states', []),
+                placeholder="All states", key="filter_states")
+        
+        with r4c2:
+            loc_col1, loc_col2 = st.columns([5, 1])
+            with loc_col1:
+                selected_countries = st.multiselect(
+                    "Country", options=filter_options.get('countries', []),
+                    placeholder="All countries", key="filter_countries")
+            with loc_col2:
+                exclude_countries = st.checkbox("Excl", key="exclude_countries",
+                                                help="Exclude selected countries")
+        
+        with r4c3:
+            epe_filter = st.selectbox(
+                "EPE Company", options=filter_options.get('epe_options', ["All"]),
+                index=0, key="epe_filter")
+        
+        with r4c4:
+            foreign_filter = st.selectbox(
+                "Customer Type", options=filter_options.get('foreign_options', ["All Customers"]),
+                index=0, key="foreign_filter")
+        
+        # ── Submit Button ─────────────────────────────────────────
+        st.form_submit_button("🔄 Apply Filters", type="primary", use_container_width=True)
     
-      st.form_submit_button("🔄 Apply Filters", type="primary", use_container_width=True)
+    # ── Compute final dates (AFTER form, so preset always wins) ──
+    date_from, date_to = _resolve_date_preset(
+        preset, date_from, date_to, today, data_min, data_max
+    )
     
     # Compile filters
     filters = {
         'date_from': date_from,
         'date_to': date_to,
-        'creators': selected_creators if selected_creators else None,
+        'creators': selected_creators or None,
         'exclude_creators': exclude_creators,
-        'customers': selected_customers if selected_customers else None,
+        'customers': selected_customers or None,
         'exclude_customers': exclude_customers,
-        'products': selected_products if selected_products else None,
+        'products': selected_products or None,
         'exclude_products': exclude_products,
-        'brands': selected_brands if selected_brands else None,
+        'brands': selected_brands or None,
         'exclude_brands': exclude_brands,
-        'ship_to_companies': selected_ship_to if selected_ship_to else None,
+        'ship_to_companies': selected_ship_to or None,
         'exclude_ship_to_companies': exclude_ship_to,
-        'states': selected_states if selected_states else None,
-        'countries': selected_countries if selected_countries else None,
+        'states': selected_states or None,
+        'countries': selected_countries or None,
         'exclude_countries': exclude_countries,
         'epe_filter': epe_filter,
         'foreign_filter': foreign_filter,
-        'timeline_status': selected_timeline if selected_timeline else None,
+        'timeline_status': selected_timeline or None,
         'exclude_timeline_status': exclude_timeline,
-        'legal_entities': selected_legal_entities if selected_legal_entities else None,
+        'legal_entities': selected_legal_entities or None,
         'exclude_legal_entities': exclude_legal_entities,
         'statuses': None,
         'exclude_statuses': False
@@ -138,204 +180,40 @@ def create_filter_section(filter_options):
     
     return filters
 
-def create_date_filter(filter_options):
-    """Create date range filter with presets - form-compatible (no st.button/st.rerun)"""
-    date_range_options = filter_options.get('date_range', {})
-    today = datetime.now().date()
-    
-    # Get actual data range from database
-    data_min = date_range_options.get('min_date', today - timedelta(days=365))
-    data_max = date_range_options.get('max_date', today + timedelta(days=365))
-    
-    # Convert datetime to date if needed
-    if hasattr(data_min, 'date'):
-        data_min = data_min.date()
-    if hasattr(data_max, 'date'):
-        data_max = data_max.date()
-    
-    # Ensure data_min <= data_max
-    if data_min > data_max:
-        data_min, data_max = data_max, data_min
-    
-    # Extend range for easier calendar navigation
-    extended_min = data_min.replace(month=1, day=1)
-    extended_max = data_max.replace(month=12, day=31)
-    
-    st.markdown("**📅 Date Range**")
-    
-    # Preset selectbox (works inside st.form, unlike st.button)
-    preset = st.selectbox(
-        "Quick Range",
-        options=["All Data", "This Week", "This Month", "Next 30 Days", "Next 90 Days", "Custom"],
-        index=0,
-        key="date_preset"
-    )
-    
-    # Calculate dates based on preset
-    if preset == "This Week":
-        week_start = today - timedelta(days=today.weekday())
-        week_end = week_start + timedelta(days=6)
-        default_from = max(week_start, data_min)
-        default_to = min(week_end, data_max)
-    elif preset == "This Month":
-        month_start = today.replace(day=1)
-        next_month = today.replace(day=28) + timedelta(days=4)
-        month_end = next_month - timedelta(days=next_month.day)
-        default_from = max(month_start, data_min)
-        default_to = min(month_end, data_max)
-    elif preset == "Next 30 Days":
-        default_from = max(today, data_min)
-        default_to = min(today + timedelta(days=30), data_max)
-    elif preset == "Next 90 Days":
-        default_from = max(today, data_min)
-        default_to = min(today + timedelta(days=90), data_max)
-    else:
-        # "All Data" or "Custom"
-        default_from = data_min
-        default_to = data_max
-    
-    # Date inputs — shown for fine-tuning, overridden by preset unless "Custom"
-    date_cols = st.columns(2)
-    
-    with date_cols[0]:
-        date_from = st.date_input(
-            "📆 From Date",
-            value=default_from,
-            min_value=extended_min,
-            max_value=extended_max,
-            key="input_date_from"
-        )
-    
-    with date_cols[1]:
-        date_to = st.date_input(
-            "📆 To Date",
-            value=default_to,
-            min_value=extended_min,
-            max_value=extended_max,
-            key="input_date_to"
-        )
-    
-    # When a preset is active (not Custom), use calculated dates
-    # This ensures preset always wins over manual date input
-    if preset != "Custom":
-        date_from = default_from
-        date_to = default_to
-    
-    # Validation with auto-swap
-    if date_from > date_to:
-        st.warning("⚠️ 'From Date' > 'To Date'. Dates will be automatically swapped.")
-        date_from, date_to = date_to, date_from
-    
-    # Show data availability hint
-    st.caption(f"💡 Data available: **{data_min.strftime('%Y/%m/%d')}** → **{data_max.strftime('%Y/%m/%d')}**")
-    
-    return date_from, date_to
 
-def create_multiselect_with_exclude(label, options, key_prefix, help_text=None):
-    """Create a multiselect with exclude checkbox"""
-    st.markdown(f"**{label}**")
+def _resolve_date_preset(preset, date_from, date_to, today, data_min, data_max):
+    """Compute actual date range from preset — called AFTER form submission"""
+    if preset == "This Week":
+        ws = today - timedelta(days=today.weekday())
+        return max(ws, data_min), min(ws + timedelta(days=6), data_max)
+    elif preset == "This Month":
+        ms = today.replace(day=1)
+        nm = today.replace(day=28) + timedelta(days=4)
+        return max(ms, data_min), min(nm - timedelta(days=nm.day), data_max)
+    elif preset == "Next 30 Days":
+        return max(today, data_min), min(today + timedelta(days=30), data_max)
+    elif preset == "Next 90 Days":
+        return max(today, data_min), min(today + timedelta(days=90), data_max)
+    elif preset == "All Data":
+        return data_min, data_max
+    else:  # Custom — use date_input values
+        if date_from > date_to:
+            date_from, date_to = date_to, date_from
+        return date_from, date_to
+
+
+def _multiselect_excl(label, options, key_prefix):
+    """Compact multiselect with exclude checkbox — single-line layout"""
     col1, col2 = st.columns([5, 1])
-    
     with col1:
         selected = st.multiselect(
-            f"Select {label}",
-            options=options,
-            default=None,
-            placeholder=f"All {label.lower()}",
-            help=help_text,
-            label_visibility="collapsed"
+            label, options=options, default=None,
+            placeholder=f"All {label.lower()}", key=f"filter_{key_prefix}"
         )
-    
     with col2:
-        exclude = st.checkbox(
-            "Excl",
-            key=f"exclude_{key_prefix}",
-            help=f"Exclude selected {label.lower()} instead of including them"
-        )
-    
+        exclude = st.checkbox("Excl", key=f"exclude_{key_prefix}",
+                               help=f"Exclude selected {label.lower()}")
     return selected, exclude
-
-def create_location_filters(filter_options):
-    """Create location-based filters"""
-    st.markdown("**Location Filters**")
-    col1, col2, col3 = st.columns([2, 2, 1])
-    
-    with col1:
-        selected_states = st.multiselect(
-            "State/Province",
-            options=filter_options.get('states', []),
-            default=None,
-            placeholder="All states"
-        )
-    
-    with col2:
-        selected_countries = st.multiselect(
-            "Country",
-            options=filter_options.get('countries', []),
-            default=None,
-            placeholder="All countries"
-        )
-    
-    with col3:
-        exclude_countries = st.checkbox(
-            "Excl",
-            key="exclude_countries",
-            help="Exclude selected countries"
-        )
-    
-    return selected_states, selected_countries, exclude_countries
-
-def create_company_type_filters(filter_options):
-    """Create EPE and foreign customer filters"""
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        epe_options = filter_options.get('epe_options', ["All"])
-        epe_filter = st.selectbox(
-            "EPE Company Filter",
-            options=epe_options,
-            index=0,
-            help="Filter by EPE company type. EPE companies are a specific customer category."
-        )
-    
-    with col2:
-        foreign_options = filter_options.get('foreign_options', ["All Customers"])
-        foreign_filter = st.selectbox(
-            "Customer Type",
-            options=foreign_options,
-            index=0,
-            help="Filter by customer location. Domestic = same country as seller, Foreign = different country."
-        )
-    
-    return epe_filter, foreign_filter
-
-def create_timeline_filter(filter_options):
-    """Create timeline status filter"""
-    st.markdown("**Delivery Timeline Status**")
-    col1, col2 = st.columns([5, 1])
-    
-    timeline_options = filter_options.get('timeline_statuses', [])
-    default_timeline = ["Completed"] if "Completed" in timeline_options else None
-    
-    with col1:
-        selected_timeline = st.multiselect(
-            "Select Timeline Status",
-            options=timeline_options,
-            default=default_timeline,
-            placeholder="All statuses",
-            help="Filter by delivery timeline: Overdue, Due Today, On Schedule, Completed",
-            label_visibility="collapsed"
-        )
-    
-    with col2:
-        exclude_timeline = st.checkbox(
-            "Excl",
-            key="exclude_timeline",
-            value=True,
-            help="Exclude selected timeline statuses instead of including them"
-        )
-    
-    return selected_timeline, exclude_timeline
 
 def display_metrics(df):
     """Display key metrics from the dataframe"""
