@@ -2,7 +2,10 @@
 """Detailed delivery list with inline ETD editing (single & bulk).
 
 Features:
-  • Read-only dataframe with native column visibility.
+  • Quick Filters — expander with DN Number, Customer, Product
+    sub-filters applied on top of the main page filters.
+  • Filter Presets — export current sub-filter as JSON, import later
+    for quick recall across sessions.
   • Inline ETD edit via st.data_editor — click any ETD cell to
     open the date picker.  Changing one line auto-expands all lines
     of the same DN into a staging section below (ETD is header-level).
@@ -18,6 +21,7 @@ Email notification:
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -93,9 +97,15 @@ def display_detailed_list(df, data_loader=None, email_sender=None):
     """
     st.subheader("📋 Detailed Delivery List")
 
-    # ── Prepare display data ─────────────────────────────────────
+    # ── Sub-filters (collapsed expander) ─────────────────────────
     display_df = df.copy()
+    display_df = _apply_detail_filters(display_df)
 
+    if display_df.empty:
+        st.info("No data matches the current filters.")
+        return
+
+    # ── Prepare display data ─────────────────────────────────────
     # Keep etd as date for the editor
     if 'etd' in display_df.columns:
         display_df['etd'] = pd.to_datetime(display_df['etd'], errors='coerce').dt.date
@@ -121,6 +131,160 @@ def display_detailed_list(df, data_loader=None, email_sender=None):
         _display_editable_table(display_df, data_loader, email_sender)
     else:
         _display_readonly_table(display_df)
+
+
+# ── Detail-level sub-filters ─────────────────────────────────────
+
+def _apply_detail_filters(df):
+    """Render sub-filter expander and apply selections to df.
+
+    Filters: DN Number, Customer, Product.
+    Also provides Export / Import of filter presets as JSON.
+    """
+    with st.expander("🔍 Quick Filters", expanded=False):
+
+        # ── Build options from current data ──────────────────────
+        dn_opts = sorted(df['dn_number'].dropna().unique()) if 'dn_number' in df.columns else []
+        cust_opts = sorted(df['customer'].dropna().unique()) if 'customer' in df.columns else []
+        prod_opts = []
+        if 'pt_code' in df.columns and 'product_pn' in df.columns:
+            prod_opts = sorted(
+                (df[['pt_code', 'product_pn']]
+                 .dropna()
+                 .drop_duplicates()
+                 .apply(lambda r: f"{r['pt_code']} - {r['product_pn']}", axis=1)
+                 .tolist())
+            )
+
+        # ── Filter widgets ───────────────────────────────────────
+        fc1, fc2, fc3 = st.columns(3)
+
+        with fc1:
+            sel_dn = st.multiselect(
+                "DN Number",
+                options=dn_opts,
+                placeholder="All DNs",
+                key="_dl_filter_dn",
+            )
+        with fc2:
+            sel_cust = st.multiselect(
+                "Customer",
+                options=cust_opts,
+                placeholder="All customers",
+                key="_dl_filter_cust",
+            )
+        with fc3:
+            sel_prod = st.multiselect(
+                "Product",
+                options=prod_opts,
+                placeholder="All products",
+                key="_dl_filter_prod",
+            )
+
+        # ── Preset: Import / Export on same row ──────────────────
+        io1, io2 = st.columns(2)
+        with io1:
+            _import_filter_config(df)
+        with io2:
+            _export_filter_config(sel_dn, sel_cust, sel_prod)
+
+    # ── Apply filters ────────────────────────────────────────────
+    mask = pd.Series(True, index=df.index)
+
+    if sel_dn:
+        mask &= df['dn_number'].isin(sel_dn)
+
+    if sel_cust:
+        mask &= df['customer'].isin(sel_cust)
+
+    if sel_prod:
+        pt_codes = [p.split(' - ')[0] for p in sel_prod]
+        mask &= df['pt_code'].isin(pt_codes)
+
+    filtered = df.loc[mask].copy()
+
+    # Show count after filter
+    if sel_dn or sel_cust or sel_prod:
+        st.caption(
+            f"Showing **{len(filtered):,}** of {len(df):,} rows  "
+            f"({filtered['delivery_id'].nunique() if not filtered.empty else 0} DNs)"
+        )
+
+    return filtered
+
+
+def _export_filter_config(sel_dn, sel_cust, sel_prod):
+    """Offer download button for current filter selections as JSON."""
+    # Only show export if at least one filter is set
+    if not (sel_dn or sel_cust or sel_prod):
+        return
+
+    config_data = {}
+    if sel_dn:
+        config_data['dn_number'] = sel_dn
+    if sel_cust:
+        config_data['customer'] = sel_cust
+    if sel_prod:
+        config_data['product'] = sel_prod
+
+    config_json = json.dumps(config_data, indent=2, ensure_ascii=False, default=str)
+
+    st.download_button(
+        "📥 Export filter preset",
+        data=config_json,
+        file_name=f"detail_filter_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+        mime="application/json",
+        key="dl_export_filter",
+    )
+
+
+def _import_filter_config(df):
+    """Upload a previously exported filter JSON and apply to session state."""
+    uploaded = st.file_uploader(
+        "📤 Import filter preset (.json)",
+        type=["json"],
+        key="_dl_import_filter",
+    )
+
+    if uploaded is None:
+        return
+
+    # Avoid re-processing the same file after rerun
+    file_id = f"{uploaded.name}_{uploaded.size}"
+    if st.session_state.get('_dl_last_import') == file_id:
+        return
+
+    try:
+        config_data = json.loads(uploaded.read().decode('utf-8'))
+
+        # Validate values exist in current data before applying
+        if 'dn_number' in config_data and 'dn_number' in df.columns:
+            valid = [v for v in config_data['dn_number']
+                     if v in df['dn_number'].values]
+            st.session_state['_dl_filter_dn'] = valid
+
+        if 'customer' in config_data and 'customer' in df.columns:
+            valid = [v for v in config_data['customer']
+                     if v in df['customer'].values]
+            st.session_state['_dl_filter_cust'] = valid
+
+        if 'product' in config_data:
+            if 'pt_code' in df.columns and 'product_pn' in df.columns:
+                current_prods = set(
+                    df[['pt_code', 'product_pn']]
+                    .dropna()
+                    .drop_duplicates()
+                    .apply(lambda r: f"{r['pt_code']} - {r['product_pn']}", axis=1)
+                )
+                valid = [v for v in config_data['product'] if v in current_prods]
+                st.session_state['_dl_filter_prod'] = valid
+
+        st.session_state['_dl_last_import'] = file_id
+        st.toast(f"✅ Filter preset loaded — {len(config_data)} filter(s)")
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Invalid filter file: {e}")
 
 
 # ── Read-only table (original behaviour) ─────────────────────────
