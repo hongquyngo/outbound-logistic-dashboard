@@ -42,12 +42,12 @@ def _load_smart(data_loader, filters, progress, status):
     """
     include_completed = needs_completed_data(filters)
 
-    # Step 1 — Load from DB (or cache)
+    # Step 1 — Load from cache (already loaded during filter options)
     status.markdown(
         "⏳ **Loading data** — "
         + ("all deliveries (incl. completed)..." if include_completed else "active deliveries...")
     )
-    progress.progress(20, text="Loading deliveries...")
+    progress.progress(20, text="Loading from cache...")
     df_base = data_loader.load_base_data(include_completed)
 
     if df_base is None or df_base.empty:
@@ -77,12 +77,12 @@ def main():
     st.title("📊 Delivery Schedule")
     render_user_guide()
 
-    # Step 0 — Load filter options
+    # Step 0 — Load filter options (triggers initial data cache)
     progress = st.progress(0, text="Initializing...")
     status = st.empty()
 
-    status.markdown("⚙️ **Loading filter options...**")
-    progress.progress(10, text="Loading filter options...")
+    status.markdown("📦 **Loading delivery data & filter options...**")
+    progress.progress(15, text="Loading data...")
     filter_options = data_loader.get_filter_options()
 
     # Clear progress while user interacts with filters
@@ -105,7 +105,7 @@ def main():
         st.info("No delivery data found for the selected filters")
         return
 
-    # Step 4 — Load overdue data
+    # Step 4 — Load overdue data (cache hit — no extra DB query)
     status.markdown("⚠️ **Loading overdue data...**")
     progress.progress(85, text="Loading overdue data...")
     include_expired = filters.get('include_expired', True)

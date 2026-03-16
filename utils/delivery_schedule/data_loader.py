@@ -426,92 +426,104 @@ class DeliveryDataLoader:
             return pd.DataFrame()
 
     def get_filter_options(self):
-        """Get unique values for filters"""
+        """Derive filter options from cached base data — zero extra DB queries.
+
+        Uses load_base_data(include_completed=True) which is already cached.
+        All DISTINCT values are extracted via pandas in sub-second time,
+        replacing the previous 11 separate SELECT DISTINCT queries.
+        """
         try:
-            queries = {
-                'creators': "SELECT DISTINCT created_by_name FROM delivery_full_view WHERE created_by_name IS NOT NULL ORDER BY created_by_name",
-                'customers': "SELECT DISTINCT customer FROM delivery_full_view WHERE customer IS NOT NULL ORDER BY customer",
-                'ship_to_companies': "SELECT DISTINCT recipient_company FROM delivery_full_view WHERE recipient_company IS NOT NULL ORDER BY recipient_company",
-                'states': "SELECT DISTINCT recipient_state_province FROM delivery_full_view WHERE recipient_state_province IS NOT NULL ORDER BY recipient_state_province",
-                'countries': "SELECT DISTINCT recipient_country_name FROM delivery_full_view WHERE recipient_country_name IS NOT NULL ORDER BY recipient_country_name",
-                'statuses': "SELECT DISTINCT shipment_status FROM delivery_full_view WHERE shipment_status IS NOT NULL ORDER BY shipment_status",
-                'timeline_statuses': "SELECT DISTINCT delivery_timeline_status FROM delivery_full_view WHERE delivery_timeline_status IS NOT NULL ORDER BY delivery_timeline_status",
-                'legal_entities': "SELECT DISTINCT legal_entity FROM delivery_full_view WHERE legal_entity IS NOT NULL ORDER BY legal_entity",
-                'brands': "SELECT DISTINCT brand FROM delivery_full_view WHERE brand IS NOT NULL ORDER BY brand",
-                # Product query - using CONCAT directly
-                'products': """
-                    SELECT DISTINCT 
-                        CONCAT(pt_code, ' - ', product_pn) as product_display
-                    FROM delivery_full_view 
-                    WHERE pt_code IS NOT NULL 
-                        AND product_pn IS NOT NULL
-                    ORDER BY pt_code
-                """
-            }
-            
+            # Reuse cached full dataset — no DB hit after first load
+            df = self.load_base_data(include_completed=True)
+
+            if df is None or df.empty:
+                logger.warning("[filter_options] No base data — returning empty options")
+                return {}
+
             options = {}
-            with self.engine.connect() as conn:
-                for key, query in queries.items():
-                    result = conn.execute(text(query))
-                    options[key] = [row[0] for row in result]
-                
-                # Get date range from ETD
-                date_range_query = """
-                SELECT 
-                    MIN(etd) as min_date,
-                    MAX(etd) as max_date
-                FROM delivery_full_view
-                WHERE etd IS NOT NULL
-                """
-                date_result = conn.execute(text(date_range_query)).fetchone()
+
+            # ── Simple DISTINCT columns ──────────────────────────────
+            _simple_cols = {
+                'creators':          'created_by_name',
+                'customers':         'customer',
+                'ship_to_companies': 'recipient_company',
+                'states':            'recipient_state_province',
+                'countries':         'recipient_country_name',
+                'statuses':          'shipment_status',
+                'timeline_statuses': 'delivery_timeline_status',
+                'legal_entities':    'legal_entity',
+                'brands':            'brand',
+            }
+
+            for key, col in _simple_cols.items():
+                if col in df.columns:
+                    options[key] = sorted(
+                        df[col].dropna().unique().tolist()
+                    )
+                else:
+                    options[key] = []
+
+            # ── Products (CONCAT pt_code + product_pn) ───────────────
+            if 'pt_code' in df.columns and 'product_pn' in df.columns:
+                product_pairs = (
+                    df[['pt_code', 'product_pn']]
+                    .dropna()
+                    .drop_duplicates()
+                    .sort_values('pt_code')
+                )
+                options['products'] = [
+                    f"{row['pt_code']} - {row['product_pn']}"
+                    for _, row in product_pairs.iterrows()
+                ]
+            else:
+                options['products'] = []
+
+            # ── Date range (min/max ETD) ─────────────────────────────
+            if 'etd' in df.columns:
+                etd = pd.to_datetime(df['etd'], errors='coerce').dropna()
+                if not etd.empty:
+                    options['date_range'] = {
+                        'min_date': etd.min().date(),
+                        'max_date': etd.max().date(),
+                    }
+                else:
+                    options['date_range'] = {
+                        'min_date': datetime.now().date() - timedelta(days=365),
+                        'max_date': datetime.now().date() + timedelta(days=365),
+                    }
+            else:
                 options['date_range'] = {
-                    'min_date': date_result[0] if date_result[0] else datetime.now().date() - timedelta(days=365),
-                    'max_date': date_result[1] if date_result[1] else datetime.now().date() + timedelta(days=365)
+                    'min_date': datetime.now().date() - timedelta(days=365),
+                    'max_date': datetime.now().date() + timedelta(days=365),
                 }
-                
-                # Get EPE company options
-                epe_query = """
-                SELECT DISTINCT is_epe_company 
-                FROM delivery_full_view 
-                WHERE is_epe_company IS NOT NULL 
-                ORDER BY is_epe_company
-                """
-                epe_result = conn.execute(text(epe_query))
-                epe_values = [row[0] for row in epe_result]
-                
-                # Create EPE filter options based on actual data
-                epe_options = ["All"]
+
+            # ── EPE Company options ──────────────────────────────────
+            epe_options = ["All"]
+            if 'is_epe_company' in df.columns:
+                epe_values = df['is_epe_company'].dropna().unique().tolist()
                 if 'Yes' in epe_values:
                     epe_options.append("EPE Companies Only")
                 if 'No' in epe_values:
                     epe_options.append("Non-EPE Companies Only")
-                options['epe_options'] = epe_options
-                
-                # Get Foreign/Domestic customer options
-                foreign_query = """
-                SELECT DISTINCT
-                    CASE 
-                        WHEN customer_country_code = legal_entity_country_code THEN 'Domestic'
-                        WHEN customer_country_code != legal_entity_country_code THEN 'Foreign'
-                        ELSE 'Unknown'
-                    END as customer_type
-                FROM delivery_full_view
-                WHERE customer_country_code IS NOT NULL 
-                    AND legal_entity_country_code IS NOT NULL
-                """
-                foreign_result = conn.execute(text(foreign_query))
-                foreign_types = [row[0] for row in foreign_result if row[0] != 'Unknown']
-                
-                # Create foreign filter options based on actual data
-                foreign_options = ["All Customers"]
-                if 'Domestic' in foreign_types:
+            options['epe_options'] = epe_options
+
+            # ── Foreign / Domestic options ────────────────────────────
+            foreign_options = ["All Customers"]
+            if 'customer_country_code' in df.columns and 'legal_entity_country_code' in df.columns:
+                has_domestic = (
+                    df['customer_country_code'] == df['legal_entity_country_code']
+                ).any()
+                has_foreign = (
+                    df['customer_country_code'] != df['legal_entity_country_code']
+                ).any()
+                if has_domestic:
                     foreign_options.append("Domestic Only")
-                if 'Foreign' in foreign_types:
+                if has_foreign:
                     foreign_options.append("Foreign Only")
-                options['foreign_options'] = foreign_options
-            
+            options['foreign_options'] = foreign_options
+
             return options
-            
+
         except Exception as e:
             logger.error(f"Error getting filter options: {e}")
             return {}
