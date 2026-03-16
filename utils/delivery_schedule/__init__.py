@@ -5,6 +5,7 @@
 from .data_loader import DeliveryDataLoader
 from .email_sender import EmailSender
 from .calendar_utils import CalendarEventGenerator
+from .client_filters import needs_completed_data, apply_client_filters
 
 # UI fragments
 from .filters import create_filter_section
@@ -19,6 +20,8 @@ __all__ = [
     'DeliveryDataLoader',
     'EmailSender',
     'CalendarEventGenerator',
+    'needs_completed_data',
+    'apply_client_filters',
     # UI
     'create_filter_section',
     'display_metrics',

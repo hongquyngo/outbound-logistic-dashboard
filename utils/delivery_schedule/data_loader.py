@@ -15,6 +15,73 @@ class DeliveryDataLoader:
     
     def __init__(self):
         self.engine = get_db_engine()
+
+    # ── Cached base loader (new) ─────────────────────────────────
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def load_base_data(_self, include_completed: bool = False):
+        """Load base dataset from DB — only two variants ever cached.
+
+        • include_completed=False  →  WHERE delivery_timeline_status != 'Completed'
+        • include_completed=True   →  all rows
+
+        Every other filter is applied client-side on this cached result.
+        """
+        try:
+            query = """
+            SELECT 
+                delivery_id, dn_number, created_by_email, created_by_name,
+                created_date, shipment_status, shipment_status_vn,
+                dispatched_date, delivered_date, sto_delivery_status,
+                sto_etd_date, is_delivered, delivery_confirmed,
+                delivery_timeline_status, days_overdue, notify_email,
+                reference_packing_list, shipping_cost, total_weight,
+                oc_id, oc_number, oc_date, oc_line_id, oc_product_pn,
+                standard_quantity, selling_quantity, uom_conversion, etd,
+                product_id, product_pn, pt_code, package_size, brand,
+                sto_dr_line_id, selling_stock_out_quantity,
+                selling_stock_out_request_quantity, stock_out_quantity,
+                stock_out_request_quantity, stockin_line_id, export_tax,
+                remaining_quantity_to_deliver,
+                total_instock_at_preferred_warehouse,
+                total_instock_all_warehouses,
+                gap_quantity, fulfill_rate_percent, fulfillment_status,
+                product_total_remaining_demand, product_active_delivery_count,
+                product_gap_quantity, product_fulfill_rate_percent,
+                delivery_demand_percentage, product_fulfillment_status,
+                customer, customer_code, customer_street, customer_zip_code,
+                customer_state_province, customer_country_code,
+                customer_country_name, customer_contact,
+                customer_contact_email, customer_contact_phone,
+                recipient_company, recipient_company_code, recipient_contact,
+                recipient_contact_email, recipient_contact_phone,
+                recipient_address, recipient_state_province,
+                recipient_country_code, recipient_country_name,
+                is_epe_company, intl_charge, local_charge,
+                legal_entity, legal_entity_code,
+                legal_entity_state_province, legal_entity_country_code,
+                legal_entity_country_name, preferred_warehouse
+            FROM delivery_full_view
+            WHERE 1=1
+            """
+
+            if not include_completed:
+                query += " AND delivery_timeline_status != 'Completed'"
+
+            query += " ORDER BY delivery_id DESC, sto_dr_line_id DESC"
+
+            with _self.engine.connect() as conn:
+                df = pd.read_sql(text(query), conn)
+
+            logger.info(
+                f"[base_data] Loaded {len(df)} rows "
+                f"(include_completed={include_completed})"
+            )
+            return df
+
+        except Exception as e:
+            logger.error(f"Error loading base data: {e}")
+            return pd.DataFrame()
     
     @st.cache_data(ttl=300)  # Cache for 5 minutes
     def load_delivery_data(_self, filters=None):
