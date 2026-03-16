@@ -21,7 +21,6 @@ Email notification:
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -139,7 +138,7 @@ def _apply_detail_filters(df):
     """Render sub-filter expander and apply selections to df.
 
     Filters: DN Number, Customer, Product.
-    Also provides Export / Import of filter presets as JSON.
+    (Full preset export/import is in filters.py — covers all filters.)
     """
     with st.expander("🔍 Quick Filters", expanded=False):
 
@@ -181,13 +180,6 @@ def _apply_detail_filters(df):
                 key="_dl_filter_prod",
             )
 
-        # ── Preset: Import / Export on same row ──────────────────
-        io1, io2 = st.columns(2)
-        with io1:
-            _import_filter_config(df)
-        with io2:
-            _export_filter_config(sel_dn, sel_cust, sel_prod)
-
     # ── Apply filters ────────────────────────────────────────────
     mask = pd.Series(True, index=df.index)
 
@@ -211,80 +203,6 @@ def _apply_detail_filters(df):
         )
 
     return filtered
-
-
-def _export_filter_config(sel_dn, sel_cust, sel_prod):
-    """Offer download button for current filter selections as JSON."""
-    # Only show export if at least one filter is set
-    if not (sel_dn or sel_cust or sel_prod):
-        return
-
-    config_data = {}
-    if sel_dn:
-        config_data['dn_number'] = sel_dn
-    if sel_cust:
-        config_data['customer'] = sel_cust
-    if sel_prod:
-        config_data['product'] = sel_prod
-
-    config_json = json.dumps(config_data, indent=2, ensure_ascii=False, default=str)
-
-    st.download_button(
-        "📥 Export filter preset",
-        data=config_json,
-        file_name=f"detail_filter_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-        mime="application/json",
-        key="dl_export_filter",
-    )
-
-
-def _import_filter_config(df):
-    """Upload a previously exported filter JSON and apply to session state."""
-    uploaded = st.file_uploader(
-        "📤 Import filter preset (.json)",
-        type=["json"],
-        key="_dl_import_filter",
-    )
-
-    if uploaded is None:
-        return
-
-    # Avoid re-processing the same file after rerun
-    file_id = f"{uploaded.name}_{uploaded.size}"
-    if st.session_state.get('_dl_last_import') == file_id:
-        return
-
-    try:
-        config_data = json.loads(uploaded.read().decode('utf-8'))
-
-        # Validate values exist in current data before applying
-        if 'dn_number' in config_data and 'dn_number' in df.columns:
-            valid = [v for v in config_data['dn_number']
-                     if v in df['dn_number'].values]
-            st.session_state['_dl_filter_dn'] = valid
-
-        if 'customer' in config_data and 'customer' in df.columns:
-            valid = [v for v in config_data['customer']
-                     if v in df['customer'].values]
-            st.session_state['_dl_filter_cust'] = valid
-
-        if 'product' in config_data:
-            if 'pt_code' in df.columns and 'product_pn' in df.columns:
-                current_prods = set(
-                    df[['pt_code', 'product_pn']]
-                    .dropna()
-                    .drop_duplicates()
-                    .apply(lambda r: f"{r['pt_code']} - {r['product_pn']}", axis=1)
-                )
-                valid = [v for v in config_data['product'] if v in current_prods]
-                st.session_state['_dl_filter_prod'] = valid
-
-        st.session_state['_dl_last_import'] = file_id
-        st.toast(f"✅ Filter preset loaded — {len(config_data)} filter(s)")
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"Invalid filter file: {e}")
 
 
 # ── Read-only table (original behaviour) ─────────────────────────

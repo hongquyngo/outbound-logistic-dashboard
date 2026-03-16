@@ -3,6 +3,7 @@
 conditionally show/hide date pickers without waiting for submit."""
 
 import streamlit as st
+import json
 from datetime import datetime, timedelta
 
 
@@ -208,7 +209,146 @@ def create_filter_section(filter_options):
         'exclude_statuses': False,
     }
 
+    # ── Filter Preset: Export / Import ──────────────────────────
+    _filter_preset_section()
+
     return filters
+
+
+# ── Filter Preset Management ─────────────────────────────────────
+
+# All session_state keys managed by the filter system.
+# Master filters (form widgets):
+_MASTER_FILTER_KEYS = {
+    # Date
+    'date_preset': 'selectbox',
+    'input_date_from': 'date',
+    'input_date_to': 'date',
+    # Multiselect + Exclude pairs
+    'filter_timeline': 'list',
+    'exclude_timeline': 'bool',
+    'filter_legal_entities': 'list',
+    'exclude_legal_entities': 'bool',
+    'filter_creators': 'list',
+    'exclude_creators': 'bool',
+    'filter_customers': 'list',
+    'exclude_customers': 'bool',
+    'filter_ship_to': 'list',
+    'exclude_ship_to': 'bool',
+    'filter_products': 'list',
+    'exclude_products': 'bool',
+    'filter_brands': 'list',
+    'exclude_brands': 'bool',
+    'filter_states': 'list',
+    'filter_countries': 'list',
+    'exclude_countries': 'bool',
+    # Selectboxes
+    'epe_filter': 'selectbox',
+    'foreign_filter': 'selectbox',
+    # Checkbox
+    'include_expired_inventory': 'bool',
+}
+
+# Detail-level quick filters (detailed_list.py):
+_DETAIL_FILTER_KEYS = {
+    '_dl_filter_dn': 'list',
+    '_dl_filter_cust': 'list',
+    '_dl_filter_prod': 'list',
+}
+
+_ALL_FILTER_KEYS = {**_MASTER_FILTER_KEYS, **_DETAIL_FILTER_KEYS}
+
+
+def _filter_preset_section():
+    """Render filter preset Export / Import controls."""
+    with st.expander("💾 Filter Presets", expanded=False):
+        col_imp, col_exp = st.columns(2)
+
+        with col_imp:
+            _import_preset()
+
+        with col_exp:
+            _export_preset()
+
+
+def _export_preset():
+    """Serialize current filter state to downloadable JSON."""
+    preset = {}
+    for key, dtype in _ALL_FILTER_KEYS.items():
+        val = st.session_state.get(key)
+        if val is None:
+            continue
+        # Skip empty lists and default values
+        if dtype == 'list' and not val:
+            continue
+        if dtype == 'date':
+            val = val.isoformat() if hasattr(val, 'isoformat') else str(val)
+        preset[key] = val
+
+    if not preset:
+        st.caption("No active filters to export.")
+        return
+
+    preset_json = json.dumps(preset, indent=2, ensure_ascii=False, default=str)
+
+    st.download_button(
+        "📥 Export current filters",
+        data=preset_json,
+        file_name=f"filter_preset_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+        mime="application/json",
+        key="_preset_export_btn",
+        use_container_width=True,
+    )
+    st.caption(f"{len(preset)} filter(s) active")
+
+
+def _import_preset():
+    """Upload a previously exported filter preset JSON."""
+    uploaded = st.file_uploader(
+        "📤 Import preset (.json)",
+        type=["json"],
+        key="_preset_import_uploader",
+    )
+
+    if uploaded is None:
+        return
+
+    # Avoid re-processing same file after rerun
+    file_id = f"{uploaded.name}_{uploaded.size}"
+    if st.session_state.get('_preset_last_import') == file_id:
+        return
+
+    try:
+        preset = json.loads(uploaded.read().decode('utf-8'))
+        applied = 0
+
+        for key, val in preset.items():
+            if key not in _ALL_FILTER_KEYS:
+                continue
+
+            dtype = _ALL_FILTER_KEYS[key]
+
+            # Type coercion
+            if dtype == 'date' and isinstance(val, str):
+                from datetime import date as _date
+                try:
+                    val = _date.fromisoformat(val)
+                except ValueError:
+                    continue
+            elif dtype == 'bool' and not isinstance(val, bool):
+                val = bool(val)
+            elif dtype == 'list' and not isinstance(val, list):
+                val = [val]
+
+            st.session_state[key] = val
+            applied += 1
+
+        st.session_state['_preset_last_import'] = file_id
+        st.toast(f"✅ Loaded preset — {applied} filter(s) applied")
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Invalid preset file: {e}")
 
 
 # ── Helpers ──────────────────────────────────────────────────────
