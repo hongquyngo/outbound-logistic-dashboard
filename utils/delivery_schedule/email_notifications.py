@@ -1,11 +1,16 @@
 # utils/delivery_schedule/email_notifications.py
-"""Email notification tab — send delivery schedules, overdue alerts,
-customs clearance emails.
+"""Email notification tab — top-to-bottom sequential layout.
+
+Layout:
+  Row 1 — Settings bar (Type · Period · Schedule) — compact horizontal
+  Row 2 — TO Recipients (full width, mode-dependent)
+  Row 3 — CC Recipients (expander, 3 columns)
+  Row 4 — Actions (Preview + Send + duplicate warning)
+  Row 5 — Email History (expander, collapsed, bottom)
 
 Enhancements (v2):
-  • TO/CC recipients selectable from employee list, email groups,
-    plus additional manual entry.
-  • Email send audit log  (email_send_log table).
+  • TO/CC from employee list, email groups, plus manual entry.
+  • Email send audit log (email_send_log table).
   • Duplicate-send warning (same recipient + type + today).
   • Real HTML preview of the email content.
   • Email history section (recent 30 sends).
@@ -38,124 +43,120 @@ _NOTIF_DB_KEY = {
 
 @st.fragment
 def display_email_notifications(data_loader, email_sender):
-    """Full email notification UI — runs as a fragment."""
+    """Full email notification UI — sequential top-to-bottom flow."""
 
     if not can_send_email():
         st.warning("🔒 You need manager/logistics role to send emails.")
         return
 
     st.subheader("📧 Email Notifications")
-    st.caption("Send delivery schedules, urgent alerts, or customs clearance emails")
 
-    # ── Email History (collapsible, at top) ────────────────────────
-    _render_email_history(data_loader)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ROW 1 — Settings bar (compact horizontal)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    s1, s2, s3 = st.columns([2, 1, 1])
 
-    # ── Layout: Recipients (left) + Settings (right) ─────────────
-    col_left, col_right = st.columns([2, 1])
-
-    with col_right:
+    with s1:
         notification_type = st.radio(
-            "📧 Notification Type",
+            "Notification Type",
             ["📅 Delivery Schedule", "🚨 Overdue Alerts", "🛃 Custom Clearance"],
             key="email_notif_type",
+            horizontal=True,
         )
 
+    with s2:
         weeks_ahead = 4
         if notification_type in ["📅 Delivery Schedule", "🛃 Custom Clearance"]:
             weeks_ahead = st.selectbox(
-                "📅 Time Period", options=[1, 2, 3, 4, 5, 6, 7, 8], index=3,
+                "Time Period",
+                options=[1, 2, 3, 4, 5, 6, 7, 8], index=3,
                 format_func=lambda x: f"{x} week{'s' if x > 1 else ''}",
                 key="email_weeks_ahead",
             )
-
-        schedule_type = st.radio(
-            "Schedule Type", ["Preview Only", "Send Now"], index=0,
-            key="email_schedule_type",
-        )
-
-    # ── Recipients ────────────────────────────────────────────────
-    with col_left:
-        selected_recipients = []
-        selected_customer_contacts = []
-        custom_recipients = []
-        customs_to_emails = []
-        sales_df = pd.DataFrame()
-
-        if notification_type == "🛃 Custom Clearance":
-            recipient_type = "customs"
-            _show_customs_summary(data_loader, weeks_ahead)
-            customs_to_emails = _render_customs_recipients(data_loader)
-
         else:
-            recipient_type = st.selectbox(
-                "Send to:",
-                ["creators", "customers", "custom"],
-                format_func=lambda x: {
-                    "creators":  "👤 Sales/Creators",
-                    "customers": "🏢 Customers",
-                    "custom":    "✉️ Custom Recipients",
-                }[x],
-                key="email_recipient_type",
-            )
+            st.markdown("")  # spacer to align
 
-            if recipient_type == "creators":
-                sales_df, selected_recipients = _render_creator_selection(
-                    data_loader, notification_type, weeks_ahead,
-                )
-            elif recipient_type == "customers":
-                selected_customer_contacts = _render_customer_selection(
-                    data_loader, weeks_ahead,
-                )
-            else:
-                custom_recipients = _render_custom_selection(data_loader)
-
-    # ── CC settings (right column) ────────────────────────────────
-    with col_right:
-        cc_emails = _render_cc_settings(
-            data_loader, notification_type,
-            recipient_type if notification_type != "🛃 Custom Clearance" else "customs",
-            selected_recipients,
-            sales_df if not sales_df.empty else None,
+    with s3:
+        schedule_type = st.radio(
+            "Schedule Type",
+            ["Preview Only", "Send Now"],
+            index=0, key="email_schedule_type",
+            horizontal=True,
         )
 
-    st.markdown("---")
+    st.divider()
 
-    # ── Preview ───────────────────────────────────────────────────
-    can_preview = _can_proceed(
-        notification_type, recipient_type if notification_type != "🛃 Custom Clearance" else "customs",
-        selected_recipients, selected_customer_contacts,
-        custom_recipients, customs_to_emails,
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ROW 2 — TO Recipients (full width)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    st.markdown("**📬 Recipients (TO)**")
+
+    selected_recipients = []
+    selected_customer_contacts = []
+    custom_recipients = []
+    customs_to_emails = []
+    sales_df = pd.DataFrame()
+
+    if notification_type == "🛃 Custom Clearance":
+        recipient_type = "customs"
+        _show_customs_summary(data_loader, weeks_ahead)
+        customs_to_emails = _render_customs_recipients(data_loader)
+
+    else:
+        recipient_type = st.radio(
+            "Send to",
+            ["creators", "customers", "custom"],
+            format_func=lambda x: {
+                "creators":  "👤 Sales/Creators",
+                "customers": "🏢 Customers",
+                "custom":    "✉️ Custom Recipients",
+            }[x],
+            key="email_recipient_type",
+            horizontal=True,
+        )
+
+        if recipient_type == "creators":
+            sales_df, selected_recipients = _render_creator_selection(
+                data_loader, notification_type, weeks_ahead,
+            )
+        elif recipient_type == "customers":
+            selected_customer_contacts = _render_customer_selection(
+                data_loader, weeks_ahead,
+            )
+        else:
+            custom_recipients = _render_custom_selection(data_loader)
+
+    st.divider()
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ROW 3 — CC Recipients (collapsible, 3 columns)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    cc_emails = _render_cc_section(
+        data_loader, notification_type,
+        recipient_type if notification_type != "🛃 Custom Clearance" else "customs",
+        selected_recipients,
+        sales_df if not sales_df.empty else None,
     )
 
-    if can_preview and st.button("👁️ Preview Email Content", key="email_preview_btn"):
-        _render_preview(
-            data_loader, email_sender, notification_type,
-            recipient_type if notification_type != "🛃 Custom Clearance" else "customs",
-            selected_recipients, selected_customer_contacts,
-            custom_recipients, customs_to_emails, sales_df, weeks_ahead,
-        )
+    st.divider()
 
-    # ── Send ──────────────────────────────────────────────────────
-    if can_preview and schedule_type == "Send Now":
-        st.markdown("---")
-        _render_send_section(
-            data_loader, email_sender, notification_type,
-            recipient_type if notification_type != "🛃 Custom Clearance" else "customs",
-            selected_recipients, selected_customer_contacts,
-            custom_recipients, customs_to_emails,
-            sales_df, cc_emails, weeks_ahead,
-        )
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ROW 4 — Actions (Preview + Send)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    _render_actions(
+        data_loader, email_sender, notification_type,
+        recipient_type if notification_type != "🛃 Custom Clearance" else "customs",
+        selected_recipients, selected_customer_contacts,
+        custom_recipients, customs_to_emails,
+        sales_df, cc_emails, weeks_ahead, schedule_type,
+    )
 
-    # ── Help ──────────────────────────────────────────────────────
-    with st.expander("ℹ️ Help & Information"):
-        st.markdown("""
-        **📅 Delivery Schedule** — upcoming deliveries grouped by week, with Excel + calendar attachment  
-        **🚨 Overdue Alerts** — urgent notifications for overdue/due-today items  
-        **🛃 Custom Clearance** — EPE & Foreign customer deliveries for customs team  
+    st.divider()
 
-        **Recipient types:** Sales/Creators · Customers (2-step: company → contact) · Custom (employee picker / email group / manual)  
-        **CC sources:** Employee picker · Email group · Manager auto-CC · Manual entry  
-        """)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ROW 5 — Email History (collapsed, at bottom)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    _render_email_history(data_loader)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -266,11 +267,51 @@ def _get_customer_contacts(_engine, customer_names, weeks_ahead=4):
 
 
 # ═════════════════════════════════════════════════════════════════
-# UI — Recipient selection
+# HELPERS
 # ═════════════════════════════════════════════════════════════════
 
 def _validate_email(email):
     return re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email) is not None
+
+
+def _build_employee_map(emp_df):
+    """Build display-label → email dict from employee DataFrame."""
+    if emp_df is None or emp_df.empty:
+        return {}
+    return {
+        f"{r['name']}  ·  {r['email']}"
+        + (f"  ·  {r['position']}" if pd.notna(r.get('position')) else ""): r['email']
+        for _, r in emp_df.iterrows()
+    }
+
+
+def _build_group_map(grp_df):
+    """Build display-label → comma-separated emails from group DataFrame."""
+    if grp_df is None or grp_df.empty:
+        return {}
+    return {
+        f"{r['group_name']}  ({r['member_count']} members)": r['member_emails']
+        for _, r in grp_df.iterrows()
+    }
+
+
+def _emails_from_group_selections(grp_map, selected_labels):
+    """Expand group selections into a flat email list."""
+    emails = []
+    for label in selected_labels:
+        raw = grp_map.get(label, '')
+        emails.extend(e.strip() for e in raw.split(',') if e.strip())
+    return emails
+
+
+def _parse_manual_emails(text_value):
+    """Parse multi-line text into (valid_emails, invalid_emails)."""
+    if not text_value:
+        return [], []
+    raw = [e.strip() for e in text_value.strip().split('\n') if e.strip()]
+    valid = [e for e in raw if _validate_email(e)]
+    invalid = [e for e in raw if not _validate_email(e)]
+    return valid, invalid
 
 
 def _can_proceed(notif_type, recip_type, selected, contacts, custom, customs_to):
@@ -285,6 +326,10 @@ def _can_proceed(notif_type, recip_type, selected, contacts, custom, customs_to)
     return False
 
 
+# ═════════════════════════════════════════════════════════════════
+# ROW 2 — TO RECIPIENTS
+# ═════════════════════════════════════════════════════════════════
+
 def _show_customs_summary(data_loader, weeks_ahead):
     customs = data_loader.get_customs_clearance_summary(weeks_ahead)
     if not customs.empty:
@@ -297,7 +342,7 @@ def _show_customs_summary(data_loader, weeks_ahead):
 
 
 def _render_creator_selection(data_loader, notification_type, weeks_ahead):
-    """Render sales/creator selection; return (sales_df, selected_names)."""
+    """Sales/creator selection; return (sales_df, selected_names)."""
     if notification_type == "🚨 Overdue Alerts":
         sales_df = _get_sales_list_overdue(data_loader.engine)
     else:
@@ -307,7 +352,7 @@ def _render_creator_selection(data_loader, notification_type, weeks_ahead):
         st.warning("No sales with active deliveries found")
         return pd.DataFrame(), []
 
-    # Build O(1) lookup dict — avoids repeated DataFrame filtering
+    # O(1) lookup
     lookup = sales_df.set_index('name').to_dict('index')
 
     if notification_type == "🚨 Overdue Alerts":
@@ -320,8 +365,9 @@ def _render_creator_selection(data_loader, notification_type, weeks_ahead):
             return f"{x} ({r.get('active_deliveries', 0)} del, {r.get('total_quantity', 0):,.0f} units)"
 
     selected = st.multiselect(
-        "Select sales people:", options=sales_df['name'].tolist(),
+        "Select sales people", options=sales_df['name'].tolist(),
         format_func=fmt, key="email_select_creators",
+        placeholder="Search sales people…",
     )
 
     if selected:
@@ -339,42 +385,49 @@ def _render_creator_selection(data_loader, notification_type, weeks_ahead):
 
 
 def _render_customer_selection(data_loader, weeks_ahead):
-    """Two-step customer → contact selection; return list of contact dicts."""
+    """Two-step customer → contact selection."""
     cust_df = _get_customers_with_deliveries(data_loader.engine, weeks_ahead)
     if cust_df.empty:
         st.warning("No customers with active deliveries found")
         return []
 
-    # O(1) lookup
     cust_lookup = cust_df.set_index('customer').to_dict('index')
     fmt_cust = lambda x: f"{x} ({cust_lookup.get(x, {}).get('active_deliveries', 0)} del)"
 
-    selected_names = st.multiselect(
-        "Step 1 — Select customers:",
-        options=cust_df['customer'].tolist(),
-        format_func=fmt_cust, key="email_select_customers",
-    )
+    c1, c2 = st.columns(2)
+
+    with c1:
+        selected_names = st.multiselect(
+            "Step 1 — Select customers",
+            options=cust_df['customer'].tolist(),
+            format_func=fmt_cust, key="email_select_customers",
+            placeholder="Search customers…",
+        )
+
     if not selected_names:
-        st.info("Select customers to see contacts")
+        with c2:
+            st.info("← Select customers to see contacts")
         return []
 
     contacts_df = _get_customer_contacts(data_loader.engine, selected_names, weeks_ahead)
     if contacts_df.empty:
-        st.warning("No contacts found for selected customers")
+        with c2:
+            st.warning("No contacts found for selected customers")
         return []
 
-    # O(1) lookup
     ct_lookup = contacts_df.set_index('contact_id').to_dict('index')
     fmt_ct = lambda cid: (
         f"{ct_lookup[cid]['contact_name']} — {ct_lookup[cid]['customer']} "
         f"({ct_lookup[cid]['email']})"
     )
 
-    selected_ids = st.multiselect(
-        "Step 2 — Select contacts:",
-        options=contacts_df['contact_id'].tolist(),
-        format_func=fmt_ct, key="email_select_contacts",
-    )
+    with c2:
+        selected_ids = st.multiselect(
+            "Step 2 — Select contacts",
+            options=contacts_df['contact_id'].tolist(),
+            format_func=fmt_ct, key="email_select_contacts",
+            placeholder="Search contacts…",
+        )
 
     contacts = contacts_df[contacts_df['contact_id'].isin(selected_ids)].to_dict('records')
     if contacts:
@@ -387,53 +440,41 @@ def _render_customer_selection(data_loader, weeks_ahead):
 
 
 def _render_custom_selection(data_loader):
-    """Enhanced custom email entry: employee picker + email group + manual."""
-    all_emails = []
-
-    # ── Employee picker ──────────────────────────────────────────
+    """Custom TO: employee + email group + manual — 3 columns."""
     emp_df = data_loader.get_employees_for_picker()
-    if not emp_df.empty:
-        emp_map = {
-            f"{r['name']}  ·  {r['email']}" + (f"  ·  {r['position']}" if pd.notna(r.get('position')) else ""): r['email']
-            for _, r in emp_df.iterrows()
-        }
-        sel_emps = st.multiselect(
-            "👥 Select Employees",
-            options=list(emp_map.keys()),
-            placeholder="Search employees…",
-            key="custom_to_employees",
-        )
-        all_emails.extend(emp_map[s] for s in sel_emps)
-
-    # ── Email Group picker ───────────────────────────────────────
     grp_df = data_loader.get_email_groups()
-    if not grp_df.empty:
-        grp_map = {
-            f"{r['group_name']}  ({r['member_count']} members)": r['member_emails']
-            for _, r in grp_df.iterrows()
-        }
-        sel_grps = st.multiselect(
-            "📋 Select Email Groups",
-            options=list(grp_map.keys()),
-            placeholder="Select groups…",
-            key="custom_to_groups",
-        )
-        for sg in sel_grps:
-            all_emails.extend(e.strip() for e in grp_map[sg].split(',') if e.strip())
+    emp_map = _build_employee_map(emp_df)
+    grp_map = _build_group_map(grp_df)
 
-    # ── Additional manual entry ──────────────────────────────────
-    txt = st.text_area(
-        "✉️ Additional emails (one per line)",
-        placeholder="john@company.com\njane@company.com",
-        height=100, key="email_custom_text",
-    )
-    if txt:
-        for e in txt.strip().split('\n'):
-            e = e.strip()
-            if e and _validate_email(e):
-                all_emails.append(e)
-            elif e:
-                st.error(f"Invalid email: {e}")
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        sel_emps = st.multiselect(
+            "👥 Employees", options=list(emp_map.keys()),
+            placeholder="Search employees…", key="custom_to_employees",
+        )
+
+    with c2:
+        sel_grps = st.multiselect(
+            "📋 Email Groups", options=list(grp_map.keys()),
+            placeholder="Select groups…", key="custom_to_groups",
+        )
+
+    with c3:
+        txt = st.text_area(
+            "✉️ Additional emails",
+            placeholder="one@company.com\ntwo@company.com",
+            height=100, key="email_custom_text",
+        )
+
+    # Collect all
+    all_emails = [emp_map[s] for s in sel_emps]
+    all_emails.extend(_emails_from_group_selections(grp_map, sel_grps))
+
+    valid_manual, invalid_manual = _parse_manual_emails(txt)
+    all_emails.extend(valid_manual)
+    if invalid_manual:
+        st.error(f"Invalid: {', '.join(invalid_manual)}")
 
     # Deduplicate
     all_emails = list(dict.fromkeys(all_emails))
@@ -444,47 +485,34 @@ def _render_custom_selection(data_loader):
 
 
 def _render_customs_recipients(data_loader):
-    """Select TO recipients for customs clearance (replaces hardcoded email)."""
-    st.info("📌 Select recipients for the customs clearance email")
-    all_emails = []
-
-    # ── Email Group (primary source for customs team) ────────────
-    grp_df = data_loader.get_email_groups()
-    if not grp_df.empty:
-        grp_map = {
-            f"{r['group_name']}  ({r['member_count']} members)": r['member_emails']
-            for _, r in grp_df.iterrows()
-        }
-        sel_grps = st.multiselect(
-            "📋 Select Email Groups",
-            options=list(grp_map.keys()),
-            placeholder="e.g. Customs Team…",
-            key="customs_to_groups",
-        )
-        for sg in sel_grps:
-            all_emails.extend(e.strip() for e in grp_map[sg].split(',') if e.strip())
-
-    # ── Employee picker ──────────────────────────────────────────
+    """Customs TO: email group + employee + manual — 3 columns."""
     emp_df = data_loader.get_employees_for_picker()
-    if not emp_df.empty:
-        emp_map = {
-            f"{r['name']}  ·  {r['email']}": r['email']
-            for _, r in emp_df.iterrows()
-        }
-        sel_emps = st.multiselect(
-            "👥 Select Employees",
-            options=list(emp_map.keys()),
-            placeholder="Search employees…",
-            key="customs_to_employees",
-        )
-        all_emails.extend(emp_map[s] for s in sel_emps)
+    grp_df = data_loader.get_email_groups()
+    emp_map = _build_employee_map(emp_df)
+    grp_map = _build_group_map(grp_df)
 
-    # ── Additional manual ────────────────────────────────────────
-    extra = st.text_input(
-        "✉️ Additional TO email",
-        placeholder="customs@partner.com",
-        key="customs_to_manual",
-    )
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        sel_grps = st.multiselect(
+            "📋 Email Groups", options=list(grp_map.keys()),
+            placeholder="e.g. Customs Team…", key="customs_to_groups",
+        )
+
+    with c2:
+        sel_emps = st.multiselect(
+            "👥 Employees", options=list(emp_map.keys()),
+            placeholder="Search employees…", key="customs_to_employees",
+        )
+
+    with c3:
+        extra = st.text_input(
+            "✉️ Additional email",
+            placeholder="customs@partner.com", key="customs_to_manual",
+        )
+
+    all_emails = _emails_from_group_selections(grp_map, sel_grps)
+    all_emails.extend(emp_map[s] for s in sel_emps)
     if extra and _validate_email(extra.strip()):
         all_emails.append(extra.strip())
     elif extra:
@@ -500,71 +528,96 @@ def _render_customs_recipients(data_loader):
 
 
 # ═════════════════════════════════════════════════════════════════
-# UI — CC settings
+# ROW 3 — CC RECIPIENTS (expander, 3 columns)
 # ═════════════════════════════════════════════════════════════════
 
-def _render_cc_settings(data_loader, notification_type, recipient_type,
-                        selected_recipients, sales_df):
-    """Enhanced CC settings: employee picker + email group + manager + manual."""
-    cc_emails = []
+def _render_cc_section(data_loader, notification_type, recipient_type,
+                       selected_recipients, sales_df):
+    """CC settings in a collapsible expander with 3-column layout."""
 
-    # ── Employee picker for CC ───────────────────────────────────
-    emp_df = data_loader.get_employees_for_picker()
-    if not emp_df.empty:
-        emp_map = {
-            f"{r['name']}  ·  {r['email']}": r['email']
-            for _, r in emp_df.iterrows()
-        }
-        sel_cc_emps = st.multiselect(
-            "👥 CC Employees",
-            options=list(emp_map.keys()),
-            placeholder="Search employees…",
-            key="cc_employees",
-        )
-        cc_emails.extend(emp_map[s] for s in sel_cc_emps)
+    with st.expander("📎 CC Recipients", expanded=False):
+        emp_df = data_loader.get_employees_for_picker()
+        grp_df = data_loader.get_email_groups()
+        emp_map = _build_employee_map(emp_df)
+        grp_map = _build_group_map(grp_df)
 
-    # ── Email Group for CC ───────────────────────────────────────
-    grp_df = data_loader.get_email_groups()
-    if not grp_df.empty:
-        grp_map = {
-            f"{r['group_name']}  ({r['member_count']} members)": r['member_emails']
-            for _, r in grp_df.iterrows()
-        }
-        sel_cc_grps = st.multiselect(
-            "📋 CC Email Groups",
-            options=list(grp_map.keys()),
-            placeholder="Select groups…",
-            key="cc_email_groups",
-        )
-        for sg in sel_cc_grps:
-            cc_emails.extend(e.strip() for e in grp_map[sg].split(',') if e.strip())
+        c1, c2, c3 = st.columns(3)
 
-    # ── Auto-CC Managers (for creator type) ──────────────────────
-    if recipient_type == "creators" and sales_df is not None and selected_recipients:
-        if st.checkbox("CC to managers", value=True, key="email_cc_managers"):
-            sel_df = sales_df[sales_df['name'].isin(selected_recipients)]
-            mgr = sel_df[sel_df['manager_email'].notna()]['manager_email'].unique().tolist()
-            if mgr:
-                st.caption(f"Managers: {', '.join(mgr)}")
-                cc_emails.extend(mgr)
+        with c1:
+            sel_cc_emps = st.multiselect(
+                "👥 CC Employees", options=list(emp_map.keys()),
+                placeholder="Search employees…", key="cc_employees",
+            )
 
-    # ── Additional manual CC ─────────────────────────────────────
-    additional = st.text_area(
-        "✉️ Additional CC (one per line)", height=80,
-        key="email_additional_cc",
-        placeholder="outbound@prostech.vn",
-    )
-    if additional:
-        for e in additional.split('\n'):
-            e = e.strip()
-            if e and _validate_email(e):
-                cc_emails.append(e)
+        with c2:
+            sel_cc_grps = st.multiselect(
+                "📋 CC Email Groups", options=list(grp_map.keys()),
+                placeholder="Select groups…", key="cc_email_groups",
+            )
 
-    # Deduplicate
-    cc_emails = list(dict.fromkeys(cc_emails))
-    if cc_emails:
-        st.caption(f"Total CC: {len(cc_emails)}")
+        with c3:
+            additional = st.text_area(
+                "✉️ Additional CC",
+                placeholder="one@company.com\ntwo@company.com",
+                height=100, key="email_additional_cc",
+            )
+
+        # Collect
+        cc_emails = [emp_map[s] for s in sel_cc_emps]
+        cc_emails.extend(_emails_from_group_selections(grp_map, sel_cc_grps))
+
+        valid_cc, _ = _parse_manual_emails(additional)
+        cc_emails.extend(valid_cc)
+
+        # Auto-CC managers (for creator type)
+        if recipient_type == "creators" and sales_df is not None and selected_recipients:
+            if st.checkbox("Auto-CC managers", value=True, key="email_cc_managers"):
+                sel_df = sales_df[sales_df['name'].isin(selected_recipients)]
+                mgr = sel_df[sel_df['manager_email'].notna()]['manager_email'].unique().tolist()
+                if mgr:
+                    cc_emails.extend(mgr)
+
+        # Deduplicate
+        cc_emails = list(dict.fromkeys(cc_emails))
+
+        if cc_emails:
+            st.caption(f"Total CC: **{len(cc_emails)}** — {', '.join(cc_emails)}")
+
     return cc_emails
+
+
+# ═════════════════════════════════════════════════════════════════
+# ROW 4 — ACTIONS (Preview + Send)
+# ═════════════════════════════════════════════════════════════════
+
+def _render_actions(data_loader, email_sender, notif_type, recip_type,
+                    selected, contacts, custom, customs_to,
+                    sales_df, cc_emails, weeks, schedule_type):
+    """Preview button + Send section — side by side when applicable."""
+
+    can_act = _can_proceed(
+        notif_type, recip_type, selected, contacts, custom, customs_to,
+    )
+
+    if not can_act:
+        st.info("Select recipients above to enable Preview / Send")
+        return
+
+    # ── Preview ──────────────────────────────────────────────────
+    if st.button("👁️ Preview Email Content", key="email_preview_btn",
+                 use_container_width=True):
+        _render_preview(
+            data_loader, email_sender, notif_type, recip_type,
+            selected, contacts, custom, customs_to, sales_df, weeks,
+        )
+
+    # ── Send section ─────────────────────────────────────────────
+    if schedule_type == "Send Now":
+        _render_send_section(
+            data_loader, email_sender, notif_type, recip_type,
+            selected, contacts, custom, customs_to,
+            sales_df, cc_emails, weeks,
+        )
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -573,7 +626,7 @@ def _render_cc_settings(data_loader, notification_type, recipient_type,
 
 def _render_preview(data_loader, email_sender, notif_type, recip_type,
                     selected, contacts, custom, customs_to, sales_df, weeks):
-    """Enhanced preview: metrics + actual HTML email content."""
+    """Metrics + actual HTML email preview."""
     with st.spinner("Generating preview..."):
         try:
             df = None
@@ -622,7 +675,7 @@ def _render_preview(data_loader, email_sender, notif_type, recip_type,
                 c2.metric("Customers", df['customer'].nunique())
                 c3.metric("Pending Qty", f"{df['remaining_quantity_to_deliver'].sum():,.0f}")
 
-            # ── Render actual HTML preview ────────────────────────
+            # ── HTML Preview ─────────────────────────────────────
             if df is not None and not df.empty and notif_type != "🛃 Custom Clearance":
                 with st.expander("📧 Email HTML Preview", expanded=True):
                     preview_df = df.copy()
@@ -636,7 +689,6 @@ def _render_preview(data_loader, email_sender, notif_type, recip_type,
                         components.html(html, height=600, scrolling=True)
                     except Exception as e:
                         st.warning(f"Could not render HTML preview: {e}")
-                        logger.warning(f"HTML preview error: {e}")
 
         except Exception as e:
             st.error(f"Preview error: {e}")
@@ -650,9 +702,9 @@ def _render_preview(data_loader, email_sender, notif_type, recip_type,
 def _render_send_section(data_loader, email_sender, notif_type, recip_type,
                          selected, contacts, custom, customs_to,
                          sales_df, cc_emails, weeks):
-    st.subheader("📤 Send Emails")
+    """Duplicate warning + confirm checkbox + send button."""
 
-    # ── Recipient count summary ──────────────────────────────────
+    # ── Recipient count ──────────────────────────────────────────
     if notif_type == "🛃 Custom Clearance":
         count_str = f"{len(customs_to)} customs recipient(s)"
     elif recip_type == "creators":
@@ -661,8 +713,6 @@ def _render_send_section(data_loader, email_sender, notif_type, recip_type,
         count_str = f"{len(contacts)} customer contacts"
     else:
         count_str = f"{len(custom)} custom recipient(s)"
-
-    st.warning(f"⚠️ About to send **{notif_type}** emails to {count_str}")
 
     # ── Duplicate check ──────────────────────────────────────────
     db_notif_type = _NOTIF_DB_KEY.get(notif_type, notif_type)
@@ -678,26 +728,33 @@ def _render_send_section(data_loader, email_sender, notif_type, recip_type,
 
     if duplicates:
         st.warning(
-            f"⚠️ Already sent today to **{len(duplicates)}** recipient(s):\n"
+            f"⚠️ Already sent today to **{len(duplicates)}** recipient(s): "
             + ", ".join(duplicates)
-            + "\n\nYou can still send again if needed."
         )
 
     # ── Confirm + Send ───────────────────────────────────────────
-    confirm = st.checkbox("I confirm to send these emails", key="email_confirm_send")
+    col_warn, col_confirm, col_btn = st.columns([3, 2, 2])
 
-    if confirm and st.button("🚀 Send Emails Now", type="primary", key="email_send_btn"):
-        results, errors = _execute_send(
-            data_loader, email_sender, notif_type, recip_type,
-            selected, contacts, custom, customs_to,
-            sales_df, cc_emails, weeks,
-        )
-        _show_results(results, errors)
+    with col_warn:
+        st.markdown(f"📤 Send **{notif_type}** to **{count_str}**")
+
+    with col_confirm:
+        confirm = st.checkbox("I confirm", key="email_confirm_send")
+
+    with col_btn:
+        if st.button("🚀 Send Now", type="primary", key="email_send_btn",
+                      disabled=not confirm, use_container_width=True):
+            results, errors = _execute_send(
+                data_loader, email_sender, notif_type, recip_type,
+                selected, contacts, custom, customs_to,
+                sales_df, cc_emails, weeks,
+            )
+            _show_results(results, errors)
 
 
 def _collect_all_to_emails(notif_type, recip_type, selected, contacts,
                             custom, customs_to, sales_df):
-    """Collect all TO emails for duplicate checking."""
+    """Flat list of all TO emails for duplicate checking."""
     emails = []
     if notif_type == "🛃 Custom Clearance":
         emails = customs_to[:]
@@ -724,44 +781,56 @@ def _execute_send(data_loader, email_sender, notif_type, recip_type,
     db_notif_type = _NOTIF_DB_KEY.get(notif_type, notif_type)
     cc_str = ', '.join(cc_emails) if cc_emails else None
 
+    def _log(email, name, rtype, dcnt, tqty, ok, msg):
+        data_loader.log_email_send(
+            db_notif_type, email, name, rtype, cc_str, None,
+            dcnt, tqty, weeks,
+            'SUCCESS' if ok else 'FAILED',
+            None if ok else msg,
+        )
+
+    def _log_skip(email, name, rtype):
+        data_loader.log_email_send(
+            db_notif_type, email, name, rtype, cc_str, None,
+            0, 0, weeks, 'SKIPPED',
+        )
+
+    def _log_fail(email, name, rtype, err):
+        data_loader.log_email_send(
+            db_notif_type, email, name, rtype, cc_str, None,
+            0, 0, weeks, 'FAILED', err,
+        )
+
     try:
         # ── Customs Clearance ────────────────────────────────────
         if notif_type == "🛃 Custom Clearance":
             df = data_loader.get_customs_clearance_schedule(weeks)
             if df.empty:
-                st.warning("No customs data")
-                return results, errors
+                st.warning("No customs data"); return results, errors
 
-            total = len(customs_to)
+            dcnt = df['delivery_id'].nunique()
+            tqty = float(df['remaining_quantity_to_deliver'].sum())
+
             for i, to_email in enumerate(customs_to):
-                progress.progress((i + 1) / total)
-                status.text(f"Sending customs email to {to_email}... ({i+1}/{total})")
+                progress.progress((i + 1) / len(customs_to))
+                status.text(f"Sending to {to_email}… ({i+1}/{len(customs_to)})")
                 try:
                     ok, msg = email_sender.send_customs_clearance_email(
                         to_email, df, cc_emails=cc_emails or None)
-                    entry = {'Recipient': to_email, 'Email': to_email,
-                             'Status': '✅' if ok else '❌', 'Message': msg}
-                    results.append(entry)
-                    data_loader.log_email_send(
-                        db_notif_type, to_email, to_email, 'customs_team',
-                        cc_str, f"Customs Clearance Schedule", df['delivery_id'].nunique(),
-                        float(df['remaining_quantity_to_deliver'].sum()), weeks,
-                        'SUCCESS' if ok else 'FAILED', None if ok else msg,
-                    )
+                    results.append({'Recipient': to_email, 'Email': to_email,
+                                    'Status': '✅' if ok else '❌', 'Message': msg})
+                    _log(to_email, to_email, 'customs_team', dcnt, tqty, ok, msg)
                 except Exception as e:
                     errors.append(str(e))
                     results.append({'Recipient': to_email, 'Email': to_email,
                                     'Status': '❌', 'Message': str(e)})
-                    data_loader.log_email_send(
-                        db_notif_type, to_email, to_email, 'customs_team',
-                        cc_str, None, 0, 0, weeks, 'FAILED', str(e),
-                    )
+                    _log_fail(to_email, to_email, 'customs_team', str(e))
 
         # ── Customers ────────────────────────────────────────────
         elif recip_type == "customers":
             for i, ct in enumerate(contacts):
                 progress.progress((i + 1) / len(contacts))
-                status.text(f"Sending to {ct['contact_name']}... ({i+1}/{len(contacts)})")
+                status.text(f"Sending to {ct['contact_name']}… ({i+1}/{len(contacts)})")
                 try:
                     df = data_loader.get_customer_deliveries(ct['customer'], weeks)
                     if not df.empty:
@@ -770,41 +839,30 @@ def _execute_send(data_loader, email_sender, notif_type, recip_type,
                             cc_emails=cc_emails or None,
                             notification_type=notif_type, weeks_ahead=weeks,
                             contact_name=ct['contact_name'])
-                        entry = {'Recipient': f"{ct['contact_name']} ({ct['customer']})",
-                                 'Email': ct['email'],
-                                 'Status': '✅' if ok else '❌', 'Message': msg}
-                        results.append(entry)
-                        data_loader.log_email_send(
-                            db_notif_type, ct['email'], ct['contact_name'],
-                            'customer_contact', cc_str, None,
-                            df['delivery_id'].nunique(),
-                            float(df['remaining_quantity_to_deliver'].sum()),
-                            weeks, 'SUCCESS' if ok else 'FAILED',
-                            None if ok else msg,
-                        )
+                        results.append({
+                            'Recipient': f"{ct['contact_name']} ({ct['customer']})",
+                            'Email': ct['email'],
+                            'Status': '✅' if ok else '❌', 'Message': msg})
+                        _log(ct['email'], ct['contact_name'], 'customer_contact',
+                             df['delivery_id'].nunique(),
+                             float(df['remaining_quantity_to_deliver'].sum()), ok, msg)
                     else:
                         results.append({'Recipient': ct['contact_name'],
                                         'Email': ct['email'],
                                         'Status': '⚠️ Skip', 'Message': 'No deliveries'})
-                        data_loader.log_email_send(
-                            db_notif_type, ct['email'], ct['contact_name'],
-                            'customer_contact', cc_str, None, 0, 0, weeks, 'SKIPPED',
-                        )
+                        _log_skip(ct['email'], ct['contact_name'], 'customer_contact')
                 except Exception as e:
                     errors.append(str(e))
                     results.append({'Recipient': ct['contact_name'],
                                     'Email': ct['email'],
                                     'Status': '❌', 'Message': str(e)})
-                    data_loader.log_email_send(
-                        db_notif_type, ct['email'], ct.get('contact_name', ''),
-                        'customer_contact', cc_str, None, 0, 0, weeks, 'FAILED', str(e),
-                    )
+                    _log_fail(ct['email'], ct.get('contact_name', ''), 'customer_contact', str(e))
 
         # ── Custom recipients ────────────────────────────────────
         elif recip_type == "custom":
             for i, email in enumerate(custom):
                 progress.progress((i + 1) / len(custom))
-                status.text(f"Sending to {email}... ({i+1}/{len(custom)})")
+                status.text(f"Sending to {email}… ({i+1}/{len(custom)})")
                 try:
                     name = email.split('@')[0].title()
                     df = (data_loader.get_all_deliveries_summary(weeks)
@@ -816,34 +874,24 @@ def _execute_send(data_loader, email_sender, notif_type, recip_type,
                             notification_type=notif_type, weeks_ahead=weeks)
                         results.append({'Recipient': name, 'Email': email,
                                         'Status': '✅' if ok else '❌', 'Message': msg})
-                        data_loader.log_email_send(
-                            db_notif_type, email, name, 'custom', cc_str, None,
-                            df['delivery_id'].nunique(),
-                            float(df['remaining_quantity_to_deliver'].sum()),
-                            weeks, 'SUCCESS' if ok else 'FAILED',
-                            None if ok else msg,
-                        )
+                        _log(email, name, 'custom',
+                             df['delivery_id'].nunique(),
+                             float(df['remaining_quantity_to_deliver'].sum()), ok, msg)
                     else:
                         results.append({'Recipient': name, 'Email': email,
                                         'Status': '⚠️ Skip', 'Message': 'No deliveries'})
-                        data_loader.log_email_send(
-                            db_notif_type, email, name, 'custom', cc_str, None,
-                            0, 0, weeks, 'SKIPPED',
-                        )
+                        _log_skip(email, name, 'custom')
                 except Exception as e:
                     errors.append(str(e))
                     results.append({'Recipient': email, 'Email': email,
                                     'Status': '❌', 'Message': str(e)})
-                    data_loader.log_email_send(
-                        db_notif_type, email, '', 'custom', cc_str, None,
-                        0, 0, weeks, 'FAILED', str(e),
-                    )
+                    _log_fail(email, '', 'custom', str(e))
 
         # ── Creators ─────────────────────────────────────────────
         else:
             for i, name in enumerate(selected):
                 progress.progress((i + 1) / len(selected))
-                status.text(f"Sending to {name}... ({i+1}/{len(selected)})")
+                status.text(f"Sending to {name}… ({i+1}/{len(selected)})")
                 try:
                     info = sales_df[sales_df['name'] == name].iloc[0]
                     df = (data_loader.get_sales_delivery_summary(name, weeks)
@@ -855,28 +903,18 @@ def _execute_send(data_loader, email_sender, notif_type, recip_type,
                             notification_type=notif_type, weeks_ahead=weeks)
                         results.append({'Recipient': name, 'Email': info['email'],
                                         'Status': '✅' if ok else '❌', 'Message': msg})
-                        data_loader.log_email_send(
-                            db_notif_type, info['email'], name, 'creator', cc_str,
-                            None, df['delivery_id'].nunique(),
-                            float(df['remaining_quantity_to_deliver'].sum()),
-                            weeks, 'SUCCESS' if ok else 'FAILED',
-                            None if ok else msg,
-                        )
+                        _log(info['email'], name, 'creator',
+                             df['delivery_id'].nunique(),
+                             float(df['remaining_quantity_to_deliver'].sum()), ok, msg)
                     else:
                         results.append({'Recipient': name, 'Email': info['email'],
                                         'Status': '⚠️ Skip', 'Message': 'No deliveries'})
-                        data_loader.log_email_send(
-                            db_notif_type, info['email'], name, 'creator', cc_str,
-                            None, 0, 0, weeks, 'SKIPPED',
-                        )
+                        _log_skip(info['email'], name, 'creator')
                 except Exception as e:
                     errors.append(str(e))
                     results.append({'Recipient': name, 'Email': 'N/A',
                                     'Status': '❌', 'Message': str(e)})
-                    data_loader.log_email_send(
-                        db_notif_type, '', name, 'creator', cc_str,
-                        None, 0, 0, weeks, 'FAILED', str(e),
-                    )
+                    _log_fail('', name, 'creator', str(e))
 
     except Exception as e:
         st.error(f"Critical error: {e}")
@@ -904,11 +942,11 @@ def _show_results(results, errors):
 
 
 # ═════════════════════════════════════════════════════════════════
-# EMAIL HISTORY
+# ROW 5 — EMAIL HISTORY (collapsed, bottom)
 # ═════════════════════════════════════════════════════════════════
 
 def _render_email_history(data_loader):
-    """Display recent email send history (collapsible)."""
+    """Recent email send history — collapsed by default at the bottom."""
     with st.expander("📜 Email History (recent 30)", expanded=False):
         history = data_loader.get_email_history(limit=30)
 
@@ -932,7 +970,6 @@ def _render_email_history(data_loader):
         avail = [c for c in display_cols if c in history.columns]
         disp = history[avail].rename(columns=display_cols)
 
-        # Format datetime
         if 'Sent At' in disp.columns:
             disp['Sent At'] = pd.to_datetime(disp['Sent At']).dt.strftime('%Y-%m-%d %H:%M')
 
