@@ -120,7 +120,7 @@ Trong tab **📧 Email Notifications**:
 
 **Bước 4 — Preview:** Nhấn **👁️ Preview** để xem nội dung email thực tế trước khi gửi.
 
-**Bước 5 — Gửi:** Chọn "Send Now" → tick xác nhận → nhấn **🚀 Send Emails Now**
+**Bước 5 — Gửi:** Tick xác nhận → nhấn **🚀 Send Now** (hoặc nhấn **👁️ Preview** để xem trước)
 
 > 💡 **Email History:** Mục **📜 Email History** ở đầu tab hiển thị 30 email gần nhất đã gửi.
 > Hệ thống cũng cảnh báo nếu bạn gửi trùng cho cùng người nhận trong ngày.
@@ -563,7 +563,7 @@ Tất cả email gửi ra đều được ghi vào bảng `email_send_log` trong
     # ── Q12 ──────────────────────────────────────────────────────
     with st.expander("**Hệ thống cảnh báo 'Already sent today' nghĩa là gì?**"):
         st.markdown("""
-Khi bạn nhấn **Send Now**, hệ thống kiểm tra bảng `email_send_log`:
+Khi bạn nhấn **🚀 Send Now**, hệ thống kiểm tra bảng `email_send_log`:
 
 Nếu đã gửi **cùng loại email** cho **cùng người nhận** trong **cùng ngày hôm nay**,
 hệ thống hiện cảnh báo kèm giờ gửi lần trước.

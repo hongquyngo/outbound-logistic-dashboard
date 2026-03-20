@@ -54,7 +54,7 @@ def display_email_notifications(data_loader, email_sender):
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # ROW 1 — Settings bar (compact horizontal)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    s1, s2, s3 = st.columns([2, 1, 1])
+    s1, s2 = st.columns([3, 1])
 
     with s1:
         notification_type = st.radio(
@@ -75,14 +75,6 @@ def display_email_notifications(data_loader, email_sender):
             )
         else:
             st.markdown("")  # spacer to align
-
-    with s3:
-        schedule_type = st.radio(
-            "Schedule Type",
-            ["Preview Only", "Send Now"],
-            index=0, key="email_schedule_type",
-            horizontal=True,
-        )
 
     st.divider()
 
@@ -148,7 +140,7 @@ def display_email_notifications(data_loader, email_sender):
         recipient_type if notification_type != "🛃 Custom Clearance" else "customs",
         selected_recipients, selected_customer_contacts,
         custom_recipients, customs_to_emails,
-        sales_df, cc_emails, weeks_ahead, schedule_type,
+        sales_df, cc_emails, weeks_ahead,
     )
 
     st.divider()
@@ -592,8 +584,8 @@ def _render_cc_section(data_loader, notification_type, recipient_type,
 
 def _render_actions(data_loader, email_sender, notif_type, recip_type,
                     selected, contacts, custom, customs_to,
-                    sales_df, cc_emails, weeks, schedule_type):
-    """Preview button + Send section — side by side when applicable."""
+                    sales_df, cc_emails, weeks):
+    """Preview and Send buttons on one row, content renders full width below."""
 
     can_act = _can_proceed(
         notif_type, recip_type, selected, contacts, custom, customs_to,
@@ -603,21 +595,60 @@ def _render_actions(data_loader, email_sender, notif_type, recip_type,
         st.info("Select recipients above to enable Preview / Send")
         return
 
-    # ── Preview ──────────────────────────────────────────────────
-    if st.button("👁️ Preview Email Content", key="email_preview_btn",
-                 use_container_width=True):
+    # ── Recipient count ──────────────────────────────────────────
+    if notif_type == "🛃 Custom Clearance":
+        count_str = f"{len(customs_to)} recipient(s)"
+    elif recip_type == "creators":
+        count_str = f"{len(selected)} sales"
+    elif recip_type == "customers":
+        count_str = f"{len(contacts)} contacts"
+    else:
+        count_str = f"{len(custom)} recipient(s)"
+
+    # ── Duplicate check ──────────────────────────────────────────
+    db_notif_type = _NOTIF_DB_KEY.get(notif_type, notif_type)
+    all_to_emails = _collect_all_to_emails(
+        notif_type, recip_type, selected, contacts, custom,
+        customs_to, sales_df,
+    )
+    duplicates = []
+    for email in all_to_emails:
+        sent, last_time = data_loader.check_email_sent_today(email, db_notif_type)
+        if sent:
+            duplicates.append(f"{email} ({last_time})")
+
+    if duplicates:
+        st.warning(f"⚠️ Already sent today: {', '.join(duplicates)}")
+
+    # ── Buttons row ──────────────────────────────────────────────
+    col_preview, col_confirm, col_send = st.columns([2, 2, 2])
+
+    with col_preview:
+        do_preview = st.button("👁️ Preview Email", key="email_preview_btn",
+                               use_container_width=True)
+
+    with col_confirm:
+        confirm = st.checkbox(f"Confirm send to {count_str}", key="email_confirm_send")
+
+    with col_send:
+        do_send = st.button("🚀 Send Now", type="primary", key="email_send_btn",
+                             disabled=not confirm, use_container_width=True)
+
+    # ── Preview content (full width below) ───────────────────────
+    if do_preview:
         _render_preview(
             data_loader, email_sender, notif_type, recip_type,
             selected, contacts, custom, customs_to, sales_df, weeks,
         )
 
-    # ── Send section ─────────────────────────────────────────────
-    if schedule_type == "Send Now":
-        _render_send_section(
+    # ── Send execution (full width below) ────────────────────────
+    if do_send:
+        results, errors = _execute_send(
             data_loader, email_sender, notif_type, recip_type,
             selected, contacts, custom, customs_to,
             sales_df, cc_emails, weeks,
         )
+        _show_results(results, errors)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -698,59 +729,6 @@ def _render_preview(data_loader, email_sender, notif_type, recip_type,
 # ═════════════════════════════════════════════════════════════════
 # SEND
 # ═════════════════════════════════════════════════════════════════
-
-def _render_send_section(data_loader, email_sender, notif_type, recip_type,
-                         selected, contacts, custom, customs_to,
-                         sales_df, cc_emails, weeks):
-    """Duplicate warning + confirm checkbox + send button."""
-
-    # ── Recipient count ──────────────────────────────────────────
-    if notif_type == "🛃 Custom Clearance":
-        count_str = f"{len(customs_to)} customs recipient(s)"
-    elif recip_type == "creators":
-        count_str = f"{len(selected)} sales people"
-    elif recip_type == "customers":
-        count_str = f"{len(contacts)} customer contacts"
-    else:
-        count_str = f"{len(custom)} custom recipient(s)"
-
-    # ── Duplicate check ──────────────────────────────────────────
-    db_notif_type = _NOTIF_DB_KEY.get(notif_type, notif_type)
-    all_to_emails = _collect_all_to_emails(
-        notif_type, recip_type, selected, contacts, custom,
-        customs_to, sales_df,
-    )
-    duplicates = []
-    for email in all_to_emails:
-        sent, last_time = data_loader.check_email_sent_today(email, db_notif_type)
-        if sent:
-            duplicates.append(f"{email} (last: {last_time})")
-
-    if duplicates:
-        st.warning(
-            f"⚠️ Already sent today to **{len(duplicates)}** recipient(s): "
-            + ", ".join(duplicates)
-        )
-
-    # ── Confirm + Send ───────────────────────────────────────────
-    col_warn, col_confirm, col_btn = st.columns([3, 2, 2])
-
-    with col_warn:
-        st.markdown(f"📤 Send **{notif_type}** to **{count_str}**")
-
-    with col_confirm:
-        confirm = st.checkbox("I confirm", key="email_confirm_send")
-
-    with col_btn:
-        if st.button("🚀 Send Now", type="primary", key="email_send_btn",
-                      disabled=not confirm, use_container_width=True):
-            results, errors = _execute_send(
-                data_loader, email_sender, notif_type, recip_type,
-                selected, contacts, custom, customs_to,
-                sales_df, cc_emails, weeks,
-            )
-            _show_results(results, errors)
-
 
 def _collect_all_to_emails(notif_type, recip_type, selected, contacts,
                             custom, customs_to, sales_df):
