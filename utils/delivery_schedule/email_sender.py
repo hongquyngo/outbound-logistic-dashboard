@@ -587,8 +587,8 @@ class EmailSender:
             # Remove duplicate columns
             delivery_df = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
             
-            # Create message
-            msg = MIMEMultipart('alternative')
+            # Create message — 'mixed' for body + attachments
+            msg = MIMEMultipart('mixed')
             
             # Set subject based on notification type with dynamic weeks
             if notification_type == "🚨 Overdue Alerts":
@@ -620,8 +620,10 @@ class EmailSender:
             else:
                 html_content = self.create_delivery_schedule_html(delivery_df, recipient_name, weeks_ahead, contact_name)
             
-            html_part = MIMEText(html_content, 'html')
-            msg.attach(html_part)
+            # Wrap HTML in 'alternative' sub-part, then attach to 'mixed'
+            body_part = MIMEMultipart('alternative')
+            body_part.attach(MIMEText(html_content, 'html'))
+            msg.attach(body_part)
             
             # Create Excel attachment
             excel_data = self.create_excel_attachment(delivery_df, notification_type)
@@ -645,8 +647,8 @@ class EmailSender:
             filename = filename.replace(' ', '_').replace('/', '_').replace('\\', '_')
             
             excel_part.add_header(
-                'Content-Disposition',
-                f'attachment; filename="{filename}"'
+                'Content-Disposition', 'attachment',
+                filename=filename,
             )
             msg.attach(excel_part)
             
@@ -670,8 +672,8 @@ class EmailSender:
                         cal_filename = cal_filename.replace(' ', '_').replace('/', '_').replace('\\', '_')
                         
                         ics_part.add_header(
-                            'Content-Disposition',
-                            f'attachment; filename="{cal_filename}"'
+                            'Content-Disposition', 'attachment',
+                            filename=cal_filename,
                         )
                         msg.attach(ics_part)
                 except Exception as e:
@@ -1571,8 +1573,8 @@ class EmailSender:
             # Remove duplicate columns
             delivery_df = delivery_df.loc[:, ~delivery_df.columns.duplicated()]
             
-            # Create message
-            msg = MIMEMultipart('alternative')
+            # Create message — 'mixed' for body + attachments
+            msg = MIMEMultipart('mixed')
             
             # Count deliveries
             epe_count = delivery_df[delivery_df['customs_type'] == 'EPE']['delivery_id'].nunique()
@@ -1586,10 +1588,11 @@ class EmailSender:
             if cc_emails:
                 msg['Cc'] = ', '.join(cc_emails)
             
-            # Create HTML content
+            # Create HTML content — wrap in 'alternative' sub-part
             html_content = self.create_customs_clearance_html(delivery_df, weeks_ahead)
-            html_part = MIMEText(html_content, 'html')
-            msg.attach(html_part)
+            body_part = MIMEMultipart('alternative')
+            body_part.attach(MIMEText(html_content, 'html'))
+            msg.attach(body_part)
             
             # Create Excel attachment with fallback
             excel_attached = False
@@ -1601,8 +1604,8 @@ class EmailSender:
                 
                 filename = f"customs_clearance_schedule_{datetime.now().strftime('%Y%m%d')}.xlsx"
                 excel_part.add_header(
-                    'Content-Disposition',
-                    f'attachment; filename="{filename}"'
+                    'Content-Disposition', 'attachment',
+                    filename=filename,
                 )
                 msg.attach(excel_part)
                 excel_attached = True
@@ -1615,9 +1618,10 @@ class EmailSender:
                     csv_part = MIMEBase('text', 'csv')
                     csv_part.set_payload(csv_data)
                     encoders.encode_base64(csv_part)
+                    csv_filename = f"customs_clearance_schedule_{datetime.now().strftime('%Y%m%d')}.csv"
                     csv_part.add_header(
-                        'Content-Disposition',
-                        f'attachment; filename="customs_clearance_schedule_{datetime.now().strftime("%Y%m%d")}.csv"'
+                        'Content-Disposition', 'attachment',
+                        filename=csv_filename,
                     )
                     msg.attach(csv_part)
                     logger.info("CSV fallback attachment created")
@@ -1634,9 +1638,10 @@ class EmailSender:
                     ics_part = MIMEBase('text', 'calendar')
                     ics_part.set_payload(ics_content.encode('utf-8'))
                     encoders.encode_base64(ics_part)
+                    ics_filename = f"customs_clearance_{datetime.now().strftime('%Y%m%d')}.ics"
                     ics_part.add_header(
-                        'Content-Disposition',
-                        f'attachment; filename="customs_clearance_{datetime.now().strftime("%Y%m%d")}.ics"'
+                        'Content-Disposition', 'attachment',
+                        filename=ics_filename,
                     )
                     msg.attach(ics_part)
             except Exception as e:
