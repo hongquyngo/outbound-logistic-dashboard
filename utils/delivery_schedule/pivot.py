@@ -4,6 +4,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from .permissions import can_export
 
 # ── Column registry ──────────────────────────────────────────────
 # Maps user-friendly names → actual DataFrame column names.
@@ -138,12 +139,13 @@ def display_pivot_table(df, data_loader):
     _render_pivot(pivot_table, row_labels)
 
     # ── Download ─────────────────────────────────────────────────
-    csv = pivot_table.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        "📥 Download CSV", data=csv,
-        file_name=f"pivot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        mime="text/csv",
-    )
+    if can_export():
+        csv = pivot_table.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "📥 Download CSV", data=csv,
+            file_name=f"pivot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+        )
 
 
 # ── Pivot builders ───────────────────────────────────────────────

@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import text
 from ..db import get_db_engine
+from .permissions import can_write_db
 import logging
 from datetime import datetime, timedelta
 
@@ -111,6 +112,14 @@ class DeliveryDataLoader:
         -------
         (bool, str)  — success flag + message
         """
+        # Permission guard — prevent writes from unauthorized roles
+        if not can_write_db():
+            logger.warning(
+                f"[ETD Update] Permission denied for delivery_id={delivery_id} "
+                f"by {updated_by}"
+            )
+            return False, "Permission denied — insufficient role for ETD updates"
+
         try:
             with self.engine.begin() as conn:
                 # 1. Fetch current ETD + DN for audit log

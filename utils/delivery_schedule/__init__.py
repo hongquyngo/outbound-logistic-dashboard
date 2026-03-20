@@ -1,6 +1,12 @@
 # utils/delivery_schedule/__init__.py
 """Delivery Schedule modules — all page logic lives here"""
 
+# Permissions (centralized role definitions)
+from .permissions import (
+    can_edit_etd, can_send_email, can_export, can_write_db,
+    ROLES_EDIT_ETD, ROLES_SEND_EMAIL, ROLES_EXPORT, ROLES_WRITE_DB,
+)
+
 # Data & services
 from .data_loader import DeliveryDataLoader
 from .email_sender import EmailSender
@@ -18,6 +24,9 @@ from .email_notifications import display_email_notifications
 from .user_guide import render_user_guide
 
 __all__ = [
+    # Permissions
+    'can_edit_etd', 'can_send_email', 'can_export', 'can_write_db',
+    'ROLES_EDIT_ETD', 'ROLES_SEND_EMAIL', 'ROLES_EXPORT', 'ROLES_WRITE_DB',
     # Data & services
     'DeliveryDataLoader',
     'EmailSender',

@@ -21,6 +21,7 @@ Email notification:
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
+from .permissions import can_edit_etd
 import logging
 
 logger = logging.getLogger(__name__)
@@ -124,9 +125,7 @@ def display_detailed_list(df, data_loader=None, email_sender=None):
     can_edit = (
         data_loader is not None
         and email_sender is not None
-        and st.session_state.get('user_role', '') in (
-            'supply_chain_manager', 'outbound_manager', 'supply_chain',
-        )
+        and can_edit_etd()
     )
 
     if can_edit:

@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
+from .permissions import can_send_email
 import re
 import logging
 
@@ -16,8 +17,7 @@ def display_email_notifications(data_loader, email_sender):
     """Full email notification UI — runs as a fragment (interactions don't rerun the whole page)"""
 
     # Role check
-    user_role = st.session_state.get('user_role', '')
-    if user_role not in ['supply_chain_manager', 'outbound_manager', 'supply_chain']:
+    if not can_send_email():
         st.warning("🔒 You need admin/manager/logistics role to send emails.")
         return
 
