@@ -85,7 +85,7 @@ Kết quả hiển thị qua 3 tab:
 |-----|-------|
 | 📊 **Pivot Table** | Bảng tổng hợp linh hoạt — chọn trục hàng/cột/giá trị tùy ý |
 | 📋 **Detailed List** | Danh sách chi tiết từng dòng sản phẩm, có thể sửa ETD trực tiếp |
-| 📧 **Email Notifications** | Gửi email thông báo lịch giao hàng cho Sales/Khách hàng |
+| 📧 **Email Notifications** | Gửi email thông báo lịch giao hàng cho Sales/Khách hàng/Nhóm email |
 
 ---
 
@@ -98,6 +98,32 @@ Trong tab **📋 Detailed List**:
 2. **Bulk Update** — Chọn nhiều DN cùng lúc → đặt 1 ngày ETD chung → nhấn **💾 Apply Bulk Update**
 
 > ⚠️ Khi lưu, hệ thống sẽ tự động gửi email thông báo đến người tạo DN (Creator/Sales).
+
+---
+
+### 📧 Cách gửi Email Notifications
+
+Trong tab **📧 Email Notifications**:
+
+**Bước 1 — Chọn loại thông báo:** Delivery Schedule / Overdue Alerts / Custom Clearance
+
+**Bước 2 — Chọn người nhận (TO):**
+
+| Loại | Cách chọn |
+|------|-----------|
+| **Sales/Creators** | Chọn từ danh sách sales có DN active |
+| **Customers** | Chọn công ty → chọn contact person |
+| **Custom** | Chọn từ danh sách nhân viên, nhóm email, hoặc nhập email thủ công |
+| **Customs Clearance** | Chọn từ nhóm email / nhân viên / nhập thủ công |
+
+**Bước 3 — Chọn CC:** Chọn nhân viên, nhóm email, hoặc nhập thủ công. Manager có thể tự động CC.
+
+**Bước 4 — Preview:** Nhấn **👁️ Preview** để xem nội dung email thực tế trước khi gửi.
+
+**Bước 5 — Gửi:** Chọn "Send Now" → tick xác nhận → nhấn **🚀 Send Emails Now**
+
+> 💡 **Email History:** Mục **📜 Email History** ở đầu tab hiển thị 30 email gần nhất đã gửi.
+> Hệ thống cũng cảnh báo nếu bạn gửi trùng cho cùng người nhận trong ngày.
 """)
 
     st.info(
@@ -223,6 +249,46 @@ def _tab_reference():
 
 > ⚠️ Mặc định, bộ lọc **Timeline Status** đã chọn sẵn "Completed" ở chế độ **Exclude**
 > → tức là ẩn các DN đã hoàn tất, chỉ hiện DN active.
+""")
+
+    # ── Permissions ──────────────────────────────────────────────
+    st.markdown("#### 🔐 Phân quyền")
+    st.markdown("""
+| Chức năng | Role được phép |
+|-----------|---------------|
+| **Xem dữ liệu** | Tất cả role đã đăng nhập |
+| **Sửa ETD** | `admin`, `supply_chain_manager`, `outbound_manager`, `supply_chain` |
+| **Gửi email** | `admin`, `supply_chain_manager`, `outbound_manager`, `supply_chain`, `sales_manager`, `GM`, `MD` |
+| **Export CSV** | `admin`, `supply_chain_manager`, `outbound_manager`, `supply_chain`, `sales_manager`, `sales`, `inbound_manager`, `warehouse_manager`, `GM`, `MD` |
+| **Ghi dữ liệu (DB)** | `admin`, `supply_chain_manager`, `outbound_manager`, `supply_chain` |
+
+> 📌 Role **admin** có toàn quyền — không bị hạn chế bởi bất kỳ rule nào.
+""")
+
+    # ── Email Features ───────────────────────────────────────────
+    st.markdown("#### 📧 Tính năng Email")
+    st.markdown("""
+| Tính năng | Mô tả |
+|-----------|-------|
+| **Email History** | Xem 30 email gần nhất đã gửi (📜 phía trên tab Email) |
+| **Duplicate Warning** | Cảnh báo khi gửi trùng cho cùng người nhận + cùng loại trong ngày |
+| **HTML Preview** | Xem nội dung email thực tế trước khi gửi |
+| **Employee Picker** | Chọn TO/CC từ danh sách nhân viên (có tìm kiếm) |
+| **Email Group** | Chọn TO/CC từ nhóm email đã tạo sẵn (VD: Customs Team, Outbound Team) |
+| **Additional Manual** | Nhập thêm email thủ công cho TO/CC |
+| **Manager Auto-CC** | Tự động CC manager khi gửi cho Sales/Creator |
+| **Audit Log** | Mỗi email gửi đều ghi log vào DB (ai gửi, gửi cho ai, khi nào, kết quả) |
+""")
+
+    # ── Email types ──────────────────────────────────────────────
+    st.markdown("#### 📨 Các loại email")
+    st.markdown("""
+| Loại | Nội dung | Attachment |
+|------|---------|-----------|
+| **📅 Delivery Schedule** | Lịch giao hàng theo tuần, fulfillment status | Excel + ICS Calendar |
+| **🚨 Overdue Alerts** | DN quá hạn + due today, yêu cầu hành động khẩn | Excel |
+| **🛃 Custom Clearance** | Lịch thông quan EPE + nước ngoài, checklist giấy tờ | Excel |
+| **📅 ETD Update** | Thông báo ETD đã thay đổi (tự động khi sửa ETD) | — |
 """)
 
 
@@ -422,6 +488,8 @@ Nội dung email gồm: DN number, Customer, Ship-To, ETD cũ → ETD mới, lý
 
 Email được gửi **theo nhóm**: nếu bạn sửa 5 DN của cùng 1 Creator, chỉ gửi 1 email
 chứa tất cả thay đổi.
+
+> 📌 Mỗi lần gửi email ETD Update đều được ghi vào **Audit Log** (bảng `email_send_log`).
 """)
 
     # ── Q7 ───────────────────────────────────────────────────────
@@ -467,11 +535,77 @@ Tương tự, Fulfill Rate % > 100% nghĩa là tồn kho gấp nhiều lần nhu
 """)
 
     # ── Q10 ──────────────────────────────────────────────────────
-    with st.expander("**Tôi cần gửi email nhưng không thấy tab Email Notifications?**"):
+    with st.expander("**Tôi cần gửi email nhưng không thấy nút gửi?**"):
         st.markdown("""
 Tab **📧 Email Notifications** luôn hiển thị, nhưng chức năng gửi email chỉ khả dụng
-cho các role: **supply_chain_manager**, **outbound_manager**, **supply_chain**.
+cho các role:
 
-Các role này cũng là những role duy nhất có thể sửa ETD. Tất cả role khác chỉ có quyền xem.
-Liên hệ quản trị viên nếu cần nâng quyền.
+| Chức năng | Role |
+|-----------|------|
+| **Gửi email** | `admin`, `supply_chain_manager`, `outbound_manager`, `supply_chain`, `sales_manager`, `GM`, `MD` |
+| **Sửa ETD** | `admin`, `supply_chain_manager`, `outbound_manager`, `supply_chain` |
+| **Export CSV** | Các role trên + `sales`, `inbound_manager`, `warehouse_manager` |
+
+Role **admin** có toàn quyền. Liên hệ quản trị viên nếu cần nâng quyền.
+""")
+
+    # ── Q11 ──────────────────────────────────────────────────────
+    with st.expander("**Email History là gì? Tìm ở đâu?**"):
+        st.markdown("""
+**📜 Email History** nằm ở đầu tab **📧 Email Notifications** (mục đóng mở).
+
+Hiển thị **30 email gần nhất** đã gửi từ hệ thống, bao gồm:
+thời gian gửi, loại email, người nhận, trạng thái (✅/❌/⚠️), người gửi, số DN.
+
+Tất cả email gửi ra đều được ghi vào bảng `email_send_log` trong DB — không thể thất lạc.
+""")
+
+    # ── Q12 ──────────────────────────────────────────────────────
+    with st.expander("**Hệ thống cảnh báo 'Already sent today' nghĩa là gì?**"):
+        st.markdown("""
+Khi bạn nhấn **Send Now**, hệ thống kiểm tra bảng `email_send_log`:
+
+Nếu đã gửi **cùng loại email** cho **cùng người nhận** trong **cùng ngày hôm nay**,
+hệ thống hiện cảnh báo kèm giờ gửi lần trước.
+
+**Đây chỉ là cảnh báo, không chặn.** Bạn vẫn có thể gửi lại nếu cần
+(ví dụ: dữ liệu đã thay đổi kể từ lần gửi trước).
+""")
+
+    # ── Q13 ──────────────────────────────────────────────────────
+    with st.expander("**Cách chọn người nhận TO/CC từ danh sách nhân viên?**"):
+        st.markdown("""
+Khi chọn **Custom Recipients** hoặc cấu hình **CC**, bạn có 3 nguồn:
+
+1. **👥 Employee Picker** — chọn từ danh sách nhân viên active (có tìm kiếm theo tên/email)
+2. **📋 Email Group** — chọn theo nhóm (VD: "Customs Team", "Outbound Team")
+   → tự động thêm tất cả email trong nhóm
+3. **✉️ Additional Manual** — nhập thêm email bằng tay (cho người ngoài hệ thống)
+
+Có thể kết hợp cả 3 nguồn. Hệ thống tự động loại bỏ email trùng lặp.
+""")
+
+    # ── Q14 ──────────────────────────────────────────────────────
+    with st.expander("**Tính năng Preview Email hoạt động thế nào?**"):
+        st.markdown("""
+Nhấn **👁️ Preview Email Content** để xem trước:
+
+1. **Metrics:** Số DN, số sản phẩm, tổng số lượng chờ giao
+2. **HTML Preview:** Nội dung email **thực tế** sẽ gửi (hiển thị trong khung cuộn)
+
+Dữ liệu preview dùng người nhận đầu tiên làm mẫu. Nội dung thực sẽ khác nhau
+cho từng người nhận (mỗi Sales/Customer có data riêng).
+""")
+
+    # ── Q15 ──────────────────────────────────────────────────────
+    with st.expander("**Customs Clearance email — không còn hardcode email?**"):
+        st.markdown("""
+Đúng. Trước đây email customs luôn gửi đến `custom.clearance@prostech.vn` cố định.
+
+Bây giờ bạn tự chọn người nhận cho Customs Clearance từ:
+- **📋 Email Group** — chọn nhóm "Customs Team" (khuyến nghị)
+- **👥 Employee** — chọn từng nhân viên customs
+- **✉️ Manual** — nhập email bên ngoài
+
+CC cũng tương tự — chọn từ employee/group/manual.
 """)
