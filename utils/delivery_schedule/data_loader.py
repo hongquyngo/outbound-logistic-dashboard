@@ -1454,3 +1454,172 @@ class DeliveryDataLoader:
         except Exception as e:
             logger.error(f"Error getting all urgent deliveries: {e}")
             return pd.DataFrame()
+
+    # ── Email Send Log ───────────────────────────────────────────
+
+    def ensure_email_send_log_table(self):
+        """Create email_send_log table if it doesn't exist (idempotent)."""
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS email_send_log (
+                        id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        notification_type VARCHAR(50)  NOT NULL,
+                        recipient_email   VARCHAR(255) NOT NULL,
+                        recipient_name    VARCHAR(255),
+                        recipient_type    VARCHAR(50),
+                        cc_emails         TEXT,
+                        subject           VARCHAR(500),
+                        delivery_count    INT DEFAULT 0,
+                        total_quantity    DECIMAL(15,2) DEFAULT 0,
+                        weeks_ahead       INT,
+                        status            ENUM('SUCCESS','FAILED','SKIPPED') NOT NULL,
+                        error_message     TEXT,
+                        sent_by_name      VARCHAR(100),
+                        sent_by_email     VARCHAR(255),
+                        sent_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_esl_recipient (recipient_email),
+                        INDEX idx_esl_sent_at   (sent_at),
+                        INDEX idx_esl_sent_by   (sent_by_email),
+                        INDEX idx_esl_type_date (notification_type, sent_at)
+                    )
+                """))
+        except Exception as e:
+            logger.warning(f"email_send_log table check: {e}")
+
+    def log_email_send(self, notification_type, recipient_email, recipient_name,
+                       recipient_type, cc_emails, subject, delivery_count,
+                       total_quantity, weeks_ahead, status, error_message=None):
+        """Write one row to email_send_log."""
+        try:
+            self.ensure_email_send_log_table()
+
+            sent_by_name = st.session_state.get('user_fullname', 'System')
+            sent_by_email = st.session_state.get('user_email', '')
+
+            with self.engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO email_send_log
+                        (notification_type, recipient_email, recipient_name,
+                         recipient_type, cc_emails, subject, delivery_count,
+                         total_quantity, weeks_ahead, status, error_message,
+                         sent_by_name, sent_by_email)
+                    VALUES
+                        (:ntype, :remail, :rname, :rtype, :cc, :subj,
+                         :dcnt, :tqty, :weeks, :status, :err,
+                         :sname, :semail)
+                """), {
+                    'ntype': notification_type,
+                    'remail': recipient_email,
+                    'rname': recipient_name,
+                    'rtype': recipient_type,
+                    'cc': cc_emails,
+                    'subj': subject,
+                    'dcnt': delivery_count,
+                    'tqty': total_quantity,
+                    'weeks': weeks_ahead,
+                    'status': status,
+                    'err': error_message,
+                    'sname': sent_by_name,
+                    'semail': sent_by_email,
+                })
+        except Exception as e:
+            logger.error(f"Failed to log email send: {e}")
+
+    def get_email_history(self, limit=30):
+        """Return recent email_send_log rows."""
+        try:
+            self.ensure_email_send_log_table()
+
+            query = text("""
+                SELECT sent_at, notification_type, recipient_email,
+                       recipient_name, recipient_type, status,
+                       error_message, sent_by_name, delivery_count,
+                       weeks_ahead, subject
+                FROM email_send_log
+                ORDER BY sent_at DESC
+                LIMIT :lim
+            """)
+            with self.engine.connect() as conn:
+                return pd.read_sql(query, conn, params={'lim': limit})
+        except Exception as e:
+            logger.warning(f"get_email_history: {e}")
+            return pd.DataFrame()
+
+    def check_email_sent_today(self, recipient_email, notification_type):
+        """Check if an email was already sent to this recipient today.
+
+        Returns (bool, str|None) — (was_sent, last_sent_time_str).
+        """
+        try:
+            self.ensure_email_send_log_table()
+
+            query = text("""
+                SELECT COUNT(*) as cnt,
+                       MAX(DATE_FORMAT(sent_at, '%%H:%%i')) as last_time
+                FROM email_send_log
+                WHERE recipient_email = :email
+                  AND notification_type = :ntype
+                  AND DATE(sent_at) = CURDATE()
+                  AND status = 'SUCCESS'
+            """)
+            with self.engine.connect() as conn:
+                row = conn.execute(query, {
+                    'email': recipient_email, 'ntype': notification_type,
+                }).fetchone()
+
+            if row and row[0] > 0:
+                return True, row[1]
+            return False, None
+
+        except Exception as e:
+            logger.warning(f"check_email_sent_today: {e}")
+            return False, None
+
+    # ── Employee & Email Group lookups ───────────────────────────
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def get_employees_for_picker(_self):
+        """Active employees with email — for TO/CC selection."""
+        try:
+            query = text("""
+                SELECT e.id, CONCAT(e.first_name, ' ', e.last_name) AS name,
+                       e.email, p.name AS position
+                FROM employees e
+                LEFT JOIN positions p ON e.position_id = p.id
+                WHERE e.delete_flag = 0
+                  AND e.email IS NOT NULL AND e.email != ''
+                  AND (e.status = 'ACTIVE' OR e.status IS NULL)
+                ORDER BY e.first_name, e.last_name
+            """)
+            with _self.engine.connect() as conn:
+                return pd.read_sql(query, conn)
+        except Exception as e:
+            logger.error(f"get_employees_for_picker: {e}")
+            return pd.DataFrame()
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def get_email_groups(_self):
+        """Email groups with member count and emails."""
+        try:
+            query = text("""
+                SELECT eg.id, eg.group_name,
+                       GROUP_CONCAT(e.email SEPARATOR ', ') AS member_emails,
+                       GROUP_CONCAT(
+                           CONCAT(e.first_name, ' ', e.last_name) SEPARATOR ', '
+                       ) AS member_names,
+                       COUNT(e.id) AS member_count
+                FROM email_group eg
+                JOIN employee_email_group eeg ON eg.id = eeg.email_group_id
+                JOIN employees e ON eeg.employee_id = e.id
+                WHERE eg.delete_flag = 0
+                  AND e.delete_flag = 0
+                  AND e.email IS NOT NULL AND e.email != ''
+                GROUP BY eg.id, eg.group_name
+                ORDER BY eg.group_name
+            """)
+            with _self.engine.connect() as conn:
+                return pd.read_sql(query, conn)
+        except Exception as e:
+            logger.error(f"get_email_groups: {e}")
+            return pd.DataFrame()

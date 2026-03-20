@@ -3,6 +3,11 @@
 
 All role checks across the module import from here.
 To add a new role or change access rules, edit ONLY this file.
+
+Known roles (from users.role column):
+  admin, GM, MD, sales_manager, sales, supply_chain_manager,
+  outbound_manager, inbound_manager, supply_chain, warehouse_manager,
+  buyer, allocator, customer, vendor, viewer
 """
 
 import streamlit as st
@@ -24,13 +29,21 @@ ROLES_SEND_EMAIL = {
     'supply_chain_manager',
     'outbound_manager',
     'supply_chain',
+    'sales_manager',
+    'GM',
+    'MD',
 }
 
 ROLES_EXPORT = {
     'supply_chain_manager',
     'outbound_manager',
     'supply_chain',
+    'sales_manager',
     'sales',
+    'inbound_manager',
+    'warehouse_manager',
+    'GM',
+    'MD',
 }
 
 ROLES_WRITE_DB = {
