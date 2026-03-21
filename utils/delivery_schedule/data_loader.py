@@ -196,6 +196,58 @@ class DeliveryDataLoader:
             logger.error(f"ETD update failed for delivery_id={delivery_id}: {e}")
             return False, str(e)
 
+    def get_etd_change_history(self, delivery_ids=None, dn_numbers=None, limit=50):
+        """Fetch ETD change history from delivery_etd_change_log.
+
+        Parameters
+        ----------
+        delivery_ids : list[int], optional
+            Filter by specific delivery IDs.
+        dn_numbers : list[str], optional
+            Filter by DN numbers (used when delivery_ids not available).
+        limit : int
+            Max rows to return.
+
+        Returns
+        -------
+        DataFrame with columns: dn_number, old_etd, new_etd,
+        changed_by, reason, changed_at.
+        Non-fatal — returns empty DataFrame if table doesn't exist.
+        """
+        try:
+            conditions = ["1=1"]
+            params = {'lim': limit}
+
+            if delivery_ids:
+                placeholders = ','.join(f':did_{i}' for i in range(len(delivery_ids)))
+                conditions.append(f"l.delivery_id IN ({placeholders})")
+                for i, did in enumerate(delivery_ids):
+                    params[f'did_{i}'] = did
+
+            elif dn_numbers:
+                placeholders = ','.join(f':dn_{i}' for i in range(len(dn_numbers)))
+                conditions.append(f"l.dn_number IN ({placeholders})")
+                for i, dn in enumerate(dn_numbers):
+                    params[f'dn_{i}'] = dn
+
+            where_clause = ' AND '.join(conditions)
+
+            query = text(f"""
+                SELECT l.dn_number, l.old_etd, l.new_etd,
+                       l.changed_by, l.reason, l.changed_at
+                FROM delivery_etd_change_log l
+                WHERE {where_clause}
+                ORDER BY l.changed_at DESC
+                LIMIT :lim
+            """)
+
+            with self.engine.connect() as conn:
+                return pd.read_sql(query, conn, params=params)
+
+        except Exception as e:
+            logger.warning(f"get_etd_change_history: {e}")
+            return pd.DataFrame()
+
     @st.cache_data(ttl=300)  # Cache for 5 minutes
     def load_delivery_data(_self, filters=None):
         """Load delivery data from delivery_full_view"""

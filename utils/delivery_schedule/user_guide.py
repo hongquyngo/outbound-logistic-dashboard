@@ -97,6 +97,10 @@ Trong tab **📋 Detailed List**:
 
 2. **Bulk Update** — Chọn nhiều DN cùng lúc → đặt 1 ngày ETD chung → nhấn **💾 Apply Bulk Update**
 
+3. **ETD History** — Xem lịch sử thay đổi ETD: chọn DN hoặc tick "Show all" → hiện bảng (ai sửa, lúc nào, ETD cũ → mới, lý do)
+
+> 💡 Khi staging thay đổi ETD (cả inline lẫn bulk), hệ thống cũng hiện lịch sử thay đổi trước đó cho DN đang sửa — giúp bạn biết DN này đã bị đổi ETD bao nhiêu lần.
+
 > ⚠️ Khi lưu, hệ thống sẽ tự động gửi email thông báo đến người tạo DN (Creator/Sales).
 
 ---

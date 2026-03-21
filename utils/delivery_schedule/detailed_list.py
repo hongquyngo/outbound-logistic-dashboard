@@ -242,7 +242,9 @@ def _display_editable_table(display_df, data_loader, email_sender):
       4. Save button commits all staged changes at once.
     """
 
-    edit_tab, bulk_tab = st.tabs(["✏️ Inline Edit", "📦 Bulk Update ETD"])
+    edit_tab, bulk_tab, history_tab = st.tabs([
+        "✏️ Inline Edit", "📦 Bulk Update ETD", "📜 ETD History",
+    ])
 
     # ━━━━ Tab 1: Inline Edit via data_editor ━━━━━━━━━━━━━━━━━━━━
     with edit_tab:
@@ -300,6 +302,9 @@ def _display_editable_table(display_df, data_loader, email_sender):
             # Show affected lines with highlight
             _show_affected_lines(affected_df)
 
+            # Show previous ETD changes for these DNs
+            _show_inline_etd_history(data_loader, changed_ids)
+
             # Reason + Save
             col_reason, col_btn = st.columns([3, 1])
             with col_reason:
@@ -324,6 +329,10 @@ def _display_editable_table(display_df, data_loader, email_sender):
     # ━━━━ Tab 2: Bulk Update ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with bulk_tab:
         _display_bulk_update(display_df, data_loader, email_sender)
+
+    # ━━━━ Tab 3: ETD Change History ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    with history_tab:
+        _display_etd_history(display_df, data_loader)
 
 
 def _display_bulk_update(display_df, data_loader, email_sender):
@@ -386,6 +395,9 @@ def _display_bulk_update(display_df, data_loader, email_sender):
 
     st.info(f"📝 **{len(changes)}** delivery(ies) will be updated to **{new_etd}**")
     _show_changes_preview(changes)
+
+    # Show previous ETD changes for these DNs
+    _show_inline_etd_history(data_loader, set(selected_ids))
 
     col_btn, col_reason = st.columns([1, 2])
     with col_reason:
@@ -670,3 +682,114 @@ def _build_column_config(df, etd_editable=False):
             config[col] = st.column_config.TextColumn(label, disabled=True)
 
     return config
+
+
+# ── ETD Change History ────────────────────────────────────────────
+
+def _format_history_df(history_df):
+    """Format ETD history DataFrame for display."""
+    if history_df.empty:
+        return history_df
+
+    disp = history_df.copy()
+
+    rename = {
+        'dn_number': 'DN Number',
+        'old_etd': 'Old ETD',
+        'new_etd': 'New ETD',
+        'changed_by': 'Changed By',
+        'reason': 'Reason',
+        'changed_at': 'Changed At',
+    }
+    disp = disp.rename(columns={k: v for k, v in rename.items() if k in disp.columns})
+
+    if 'Changed At' in disp.columns:
+        disp['Changed At'] = pd.to_datetime(
+            disp['Changed At'], errors='coerce'
+        ).dt.strftime('%Y-%m-%d %H:%M')
+
+    for col in ['Old ETD', 'New ETD']:
+        if col in disp.columns:
+            disp[col] = pd.to_datetime(
+                disp[col], errors='coerce'
+            ).dt.strftime('%Y-%m-%d')
+
+    return disp
+
+
+def _show_inline_etd_history(data_loader, delivery_ids):
+    """Compact ETD history for staged/selected DNs — shown in expander."""
+    if not delivery_ids:
+        return
+
+    history = data_loader.get_etd_change_history(
+        delivery_ids=list(delivery_ids), limit=20,
+    )
+
+    if history.empty:
+        return
+
+    with st.expander(
+        f"📜 Previous ETD changes for these DN(s) ({len(history)} records)",
+        expanded=False,
+    ):
+        disp = _format_history_df(history)
+        st.dataframe(
+            disp, use_container_width=True, hide_index=True,
+            height=min(250, 40 + len(disp) * 35),
+        )
+
+
+def _display_etd_history(display_df, data_loader):
+    """Full ETD change history tab — DN picker + history table."""
+    st.caption("View ETD change history for any delivery in the current filtered data.")
+
+    # DN picker
+    if 'dn_number' in display_df.columns:
+        dn_opts = sorted(display_df['dn_number'].dropna().unique())
+    else:
+        dn_opts = []
+
+    if not dn_opts:
+        st.info("No deliveries available.")
+        return
+
+    col_dn, col_all = st.columns([3, 1])
+
+    with col_dn:
+        selected_dns = st.multiselect(
+            "Select DN(s) to view history",
+            options=dn_opts,
+            placeholder="Search DN numbers…",
+            key="_etd_history_dns",
+        )
+
+    with col_all:
+        st.markdown("")  # spacer
+        show_all = st.checkbox(
+            "Show all (recent 50)", key="_etd_history_all",
+        )
+
+    # Fetch
+    if show_all:
+        history = data_loader.get_etd_change_history(limit=50)
+    elif selected_dns:
+        history = data_loader.get_etd_change_history(
+            dn_numbers=selected_dns, limit=50,
+        )
+    else:
+        st.info("Select DN(s) above or check 'Show all' to view history.")
+        return
+
+    if history.empty:
+        st.info("No ETD changes found.")
+        return
+
+    # Display
+    disp = _format_history_df(history)
+
+    st.markdown(f"**{len(disp)} ETD change(s) found**")
+    st.dataframe(
+        disp, use_container_width=True, hide_index=True,
+        height=min(500, 40 + len(disp) * 35),
+    )
