@@ -15,6 +15,9 @@ def create_filter_section(filter_options):
     else stays inside the form to prevent full-page reruns.
     """
 
+    # ── Apply pending preset import (BEFORE any widget renders) ──
+    _apply_pending_import()
+
     # ── Minimal styling ─────────────────────────────────────────
     st.markdown("""
     <style>
@@ -303,7 +306,12 @@ def _export_preset():
 
 
 def _import_preset():
-    """Upload a previously exported filter preset JSON."""
+    """Upload a previously exported filter preset JSON.
+
+    Uses a staging dict (_pending_preset_import) so that values are
+    applied BEFORE widgets render on the next rerun — avoids the
+    'cannot modify after widget is instantiated' error.
+    """
     uploaded = st.file_uploader(
         "📤 Import preset (.json)",
         type=["json"],
@@ -320,7 +328,7 @@ def _import_preset():
 
     try:
         preset = json.loads(uploaded.read().decode('utf-8'))
-        applied = 0
+        staged = {}
 
         for key, val in preset.items():
             if key not in _ALL_FILTER_KEYS:
@@ -340,15 +348,39 @@ def _import_preset():
             elif dtype == 'list' and not isinstance(val, list):
                 val = [val]
 
-            st.session_state[key] = val
-            applied += 1
+            staged[key] = val
 
+        # Stage for next rerun — applied by _apply_pending_import()
+        st.session_state['_pending_preset_import'] = staged
         st.session_state['_preset_last_import'] = file_id
-        st.toast(f"✅ Loaded preset — {applied} filter(s) applied")
+        st.toast(f"✅ Loaded preset — {len(staged)} filter(s) will be applied")
         st.rerun()
 
     except Exception as e:
         st.error(f"Invalid preset file: {e}")
+
+
+def _apply_pending_import():
+    """Apply staged preset values BEFORE any widget renders.
+
+    Called at the very top of create_filter_section() so that
+    session_state keys are set before Streamlit instantiates
+    the corresponding widgets.
+    """
+    staged = st.session_state.pop('_pending_preset_import', None)
+    if not staged:
+        return
+
+    applied = 0
+    for key, val in staged.items():
+        try:
+            st.session_state[key] = val
+            applied += 1
+        except Exception:
+            pass  # widget already instantiated in a rare edge case
+
+    if applied:
+        st.toast(f"✅ Applied {applied} filter(s) from preset")
 
 
 # ── Helpers ──────────────────────────────────────────────────────

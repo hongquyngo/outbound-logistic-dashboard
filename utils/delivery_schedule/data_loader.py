@@ -162,38 +162,29 @@ class DeliveryDataLoader:
                 if rows_affected == 0:
                     return False, f"No rows updated for delivery_id={delivery_id}"
 
-                # 3. Audit log (create table if not exists — idempotent)
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS delivery_etd_change_log (
-                        id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        delivery_id     BIGINT NOT NULL,
-                        dn_number       VARCHAR(50),
-                        old_etd         DATE,
-                        new_etd         DATE NOT NULL,
-                        changed_by      VARCHAR(100) NOT NULL,
-                        reason          TEXT,
-                        changed_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_del_etdlog_delivery (delivery_id),
-                        INDEX idx_del_etdlog_changed  (changed_at)
+                # 3. Audit log — INSERT only (table must exist via migration)
+                #    Non-fatal: ETD update succeeds even if audit log fails
+                try:
+                    conn.execute(
+                        text("""
+                            INSERT INTO delivery_etd_change_log
+                                (delivery_id, dn_number, old_etd, new_etd, changed_by, reason)
+                            VALUES
+                                (:did, :dn, :old_etd, :new_etd, :changed_by, :reason)
+                        """),
+                        {
+                            "did": delivery_id,
+                            "dn": dn_number,
+                            "old_etd": old_etd,
+                            "new_etd": new_etd,
+                            "changed_by": updated_by,
+                            "reason": reason or None,
+                        },
                     )
-                """))
-
-                conn.execute(
-                    text("""
-                        INSERT INTO delivery_etd_change_log
-                            (delivery_id, dn_number, old_etd, new_etd, changed_by, reason)
-                        VALUES
-                            (:did, :dn, :old_etd, :new_etd, :changed_by, :reason)
-                    """),
-                    {
-                        "did": delivery_id,
-                        "dn": dn_number,
-                        "old_etd": old_etd,
-                        "new_etd": new_etd,
-                        "changed_by": updated_by,
-                        "reason": reason or None,
-                    },
-                )
+                except Exception as audit_err:
+                    logger.warning(
+                        f"[ETD Update] Audit log failed (ETD update still OK): {audit_err}"
+                    )
 
             logger.info(
                 f"[ETD Update] delivery_id={delivery_id} dn={dn_number} "
@@ -1456,44 +1447,15 @@ class DeliveryDataLoader:
             return pd.DataFrame()
 
     # ── Email Send Log ───────────────────────────────────────────
-
-    def ensure_email_send_log_table(self):
-        """Create email_send_log table if it doesn't exist (idempotent)."""
-        try:
-            with self.engine.begin() as conn:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS email_send_log (
-                        id                BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        notification_type VARCHAR(50)  NOT NULL,
-                        recipient_email   VARCHAR(255) NOT NULL,
-                        recipient_name    VARCHAR(255),
-                        recipient_type    VARCHAR(50),
-                        cc_emails         TEXT,
-                        subject           VARCHAR(500),
-                        delivery_count    INT DEFAULT 0,
-                        total_quantity    DECIMAL(15,2) DEFAULT 0,
-                        weeks_ahead       INT,
-                        status            ENUM('SUCCESS','FAILED','SKIPPED') NOT NULL,
-                        error_message     TEXT,
-                        sent_by_name      VARCHAR(100),
-                        sent_by_email     VARCHAR(255),
-                        sent_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        INDEX idx_esl_recipient (recipient_email),
-                        INDEX idx_esl_sent_at   (sent_at),
-                        INDEX idx_esl_sent_by   (sent_by_email),
-                        INDEX idx_esl_type_date (notification_type, sent_at)
-                    )
-                """))
-        except Exception as e:
-            logger.warning(f"email_send_log table check: {e}")
+    # Table `email_send_log` must be created via SQL migration
+    # (see create_email_send_log.sql). All methods below are
+    # non-fatal — they log warnings if the table doesn't exist.
 
     def log_email_send(self, notification_type, recipient_email, recipient_name,
                        recipient_type, cc_emails, subject, delivery_count,
                        total_quantity, weeks_ahead, status, error_message=None):
-        """Write one row to email_send_log."""
+        """Write one row to email_send_log. Non-fatal on failure."""
         try:
-            self.ensure_email_send_log_table()
-
             sent_by_name = st.session_state.get('user_fullname', 'System')
             sent_by_email = st.session_state.get('user_email', '')
 
@@ -1527,9 +1489,8 @@ class DeliveryDataLoader:
             logger.error(f"Failed to log email send: {e}")
 
     def get_email_history(self, limit=30):
-        """Return recent email_send_log rows."""
+        """Return recent email_send_log rows. Non-fatal on failure."""
         try:
-            self.ensure_email_send_log_table()
 
             query = text("""
                 SELECT sent_at, notification_type, recipient_email,
@@ -1550,9 +1511,9 @@ class DeliveryDataLoader:
         """Check if an email was already sent to this recipient today.
 
         Returns (bool, str|None) — (was_sent, last_sent_time_str).
+        Non-fatal — returns (False, None) if table doesn't exist.
         """
         try:
-            self.ensure_email_send_log_table()
 
             query = text("""
                 SELECT COUNT(*) as cnt,
